@@ -184,7 +184,7 @@ Run: `npm test -- tests/config.test.ts`  Expected: FAIL (module not found).
 ```ts
 import path from "node:path";
 
-export function parseBootstrap(env: NodeJS.ProcessEnv) {
+export function parseBootstrap(env: Record<string, string | undefined>) {
   const dataDir = env.DATA_DIR && env.DATA_DIR.trim() ? env.DATA_DIR.trim() : "data";
   const join = (f: string) => path.join(dataDir, f).split(path.sep).join("/");
   return {
