@@ -1,31 +1,14 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Globe2, ShieldCheck, Gavel, FileText, ScrollText, Network, Settings, Users, LogOut } from "lucide-react";
+import { ShieldCheck, LogOut } from "lucide-react";
 import type { Role } from "@/lib/auth/session";
-
-const groups = [
-  { label: "Monitoring", items: [
-    { href: "/", label: "Overview", icon: LayoutDashboard },
-    { href: "/sources", label: "Sources", icon: Globe2 },
-    { href: "/authentication", label: "Authentication", icon: ShieldCheck },
-    { href: "/policy", label: "Policy", icon: Gavel },
-  ]},
-  { label: "Reports", items: [
-    { href: "/reports", label: "Reports", icon: FileText },
-    { href: "/dns", label: "DNS Report", icon: Network },
-    { href: "/ingest-log", label: "Ingest Log", icon: ScrollText },
-  ]},
-];
-const adminGroup = { label: "Administration", items: [
-  { href: "/settings", label: "Settings", icon: Settings },
-  { href: "/users", label: "Users", icon: Users },
-]};
+import { navGroupsForRole, isNavActive } from "./nav-model";
 
 export function AppSidebar({ role, username, appName, logoExt }: { role: Role; username?: string; appName: string; logoExt: string }) {
   const path = usePathname();
-  const navGroups = role === "admin" ? [...groups, adminGroup] : groups;
-  const isActive = (href: string) => (href === "/" ? path === "/" : path.startsWith(href));
+  const navGroups = navGroupsForRole(role);
+  const isActive = (href: string) => isNavActive(path, href);
 
   return (
     <aside className="sticky top-0 hidden h-screen w-[256px] shrink-0 flex-col bg-sidebar text-sidebar-foreground md:flex">

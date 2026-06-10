@@ -14,8 +14,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
     <div className="flex min-h-screen">
       <AppSidebar role={session.role!} username={session.username} appName={brand.appName} logoExt={brand.logoExt} />
       <div className="flex min-w-0 flex-1 flex-col">
-        <AppHeader role={session.role!} />
-        <main className="mx-auto w-full max-w-[1440px] flex-1 px-6 py-7">
+        <AppHeader role={session.role!} username={session.username} appName={brand.appName} logoExt={brand.logoExt} />
+        <main className="mx-auto w-full max-w-[1440px] flex-1 px-4 py-5 sm:px-6 sm:py-7">
           <DialogProvider>{children}</DialogProvider>
         </main>
       </div>
