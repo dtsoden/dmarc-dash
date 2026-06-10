@@ -34,7 +34,7 @@ Test-ApplicationAccessPolicy -Identity someoneelse@yourdomain.com -AppId <CLIENT
 ```
 
 ## 5. Enter everything in the Setup Wizard (no .env)
-Start the app and open it in a browser — first run redirects to the **Setup Wizard**.
+Start the app and open it in a browser: first run redirects to the **Setup Wizard**.
 Enter: admin account; Graph TENANT_ID/CLIENT_ID/CLIENT_SECRET and the mailbox UPN (use
 "Test connection"); poll interval + delete mode; and (optional) the MailerSend token from
 `C:/Users/DavidSoden/registry/email_access_token.txt`, a verified MailerSend from-address,
