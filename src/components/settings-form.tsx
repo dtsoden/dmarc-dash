@@ -366,6 +366,7 @@ function SourceManager() {
   const [sources, setSources] = useState<Source[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [err, setErr] = useState("");
+  const [showAdd, setShowAdd] = useState(false);
 
   async function reload() {
     try {
@@ -385,21 +386,29 @@ function SourceManager() {
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">
-        The mailboxes the dashboard monitors for DMARC aggregate reports. Add one source per domain: Microsoft 365 (Graph) for Office 365 tenants, or IMAP for Gmail/Workspace and others.
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-muted-foreground">
+          The mailboxes monitored for DMARC reports. One source per domain: Microsoft 365 for Office 365, or IMAP for Gmail/Workspace and others.
+        </p>
+        {!showAdd && (
+          <button type="button" onClick={() => setShowAdd(true)}
+            className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-primary px-3.5 py-2 text-sm font-medium text-primary-foreground">
+            <Plus className="size-4" /> Add domain
+          </button>
+        )}
+      </div>
 
       {err && <p className="text-sm text-destructive">{err}</p>}
 
-      {sources.length === 0 && (
-        <p className="text-sm text-muted-foreground">No monitored domains yet. Add one below.</p>
+      {showAdd && <AddSourceCard onAdded={() => { setShowAdd(false); reload(); }} onCancel={() => setShowAdd(false)} />}
+
+      {sources.length === 0 && !showAdd && (
+        <p className="rounded-2xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">No monitored domains yet. Click &ldquo;Add domain&rdquo; to configure one.</p>
       )}
 
       {sources.map((s) => (
         <SourceCard key={s.id} source={s} onChanged={reload} />
       ))}
-
-      <AddSourceCard onAdded={reload} />
     </div>
   );
 }
@@ -514,7 +523,7 @@ function SourceCard({ source, onChanged }: { source: Source; onChanged: () => vo
   );
 }
 
-function AddSourceCard({ onAdded }: { onAdded: () => void }) {
+function AddSourceCard({ onAdded, onCancel }: { onAdded: () => void; onCancel: () => void }) {
   const [domain, setDomain] = useState("");
   const [provider, setProvider] = useState<Provider>("graph");
   const [ff, setFf] = useState<ProviderFields>(EMPTY_FIELDS);
@@ -553,11 +562,6 @@ function AddSourceCard({ onAdded }: { onAdded: () => void }) {
 
   return (
     <section className={`${card} border-dashed`}>
-      <div className="flex items-center gap-2">
-        <Plus className="size-5 text-primary" />
-        <h2 className="font-display font-medium">Add domain</h2>
-      </div>
-
       <div><label className={labelCls}>Domain</label>
         <input className={input} placeholder="example.com" value={domain} onChange={(e) => setDomain(e.target.value)} /></div>
 
@@ -584,8 +588,9 @@ function AddSourceCard({ onAdded }: { onAdded: () => void }) {
       <ProviderFieldset provider={provider} ff={ff} setFf={setFf} />
 
       <div className="flex flex-wrap items-center gap-2">
-        <button type="button" className={btnPrimary} onClick={add}>Add</button>
+        <button type="button" className={btnPrimary} onClick={add}>Add domain</button>
         <button type="button" className={btnGhost} onClick={test}>Test connection</button>
+        <button type="button" className={btnGhost} onClick={() => { reset(); onCancel(); }}>Cancel</button>
       </div>
       {testMsg && <p className={`text-sm ${testOk === false ? "text-destructive" : testOk ? "text-green-600 dark:text-green-400" : "text-muted-foreground"}`}>{testMsg}</p>}
       {msg && <p className="text-sm">{msg}</p>}

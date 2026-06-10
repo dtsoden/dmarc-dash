@@ -11,19 +11,19 @@ export function FilterBar({ domains }: { domains: string[] }) {
   }
   return (
     <div className="mb-6 flex flex-wrap items-end gap-3">
-      <label className="text-sm">Domain
-        <select className="ml-2 rounded-md border px-2 py-1" defaultValue={params.get("domain") ?? ""}
+      <label className="text-sm text-muted-foreground">Domain
+        <select className="ml-2 rounded-md border border-border bg-background px-2 py-1 text-foreground" defaultValue={params.get("domain") ?? ""}
           onChange={(e) => setParam("domain", e.target.value)}>
           <option value="">All</option>
           {domains.map((d) => <option key={d} value={d}>{d}</option>)}
         </select>
       </label>
-      <label className="text-sm">From
-        <input type="date" className="ml-2 rounded-md border px-2 py-1" defaultValue={params.get("from") ?? ""}
+      <label className="text-sm text-muted-foreground">From
+        <input type="date" className="ml-2 rounded-md border border-border bg-background px-2 py-1 text-foreground" defaultValue={params.get("from") ?? ""}
           onChange={(e) => setParam("from", e.target.value)} />
       </label>
-      <label className="text-sm">To
-        <input type="date" className="ml-2 rounded-md border px-2 py-1" defaultValue={params.get("to") ?? ""}
+      <label className="text-sm text-muted-foreground">To
+        <input type="date" className="ml-2 rounded-md border border-border bg-background px-2 py-1 text-foreground" defaultValue={params.get("to") ?? ""}
           onChange={(e) => setParam("to", e.target.value)} />
       </label>
     </div>
