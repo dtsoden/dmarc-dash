@@ -25,7 +25,7 @@ function previewText(hex: string): string {
 export default function SetupWizard() {
   const router = useRouter();
   const [step, setStep] = useState(0);
-  const [restoreMode, setRestoreMode] = useState(false);
+  const [mode, setMode] = useState<"choose" | "new" | "restore">("choose");
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
@@ -184,13 +184,38 @@ export default function SetupWizard() {
   return (
     <div className="mx-auto max-w-lg p-8">
       <h1 className="mb-1 font-display text-2xl font-semibold">DMARC Dashboard setup</h1>
-      {restoreMode ? (
+
+      {mode === "choose" && (
         <div className="space-y-4">
-          <p className="mb-2 text-sm text-muted-foreground">Restore this fresh instance from a backup taken on another dashboard. The entire data volume, including the admin login, is replaced with the backup&apos;s contents.</p>
-          <RestoreCard />
-          <button type="button" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground" onClick={() => setRestoreMode(false)}>&larr; Back to guided setup</button>
+          <p className="mb-2 text-sm text-muted-foreground">Are you setting up a new system, or restoring one from a backup?</p>
+          <button type="button" onClick={() => { setMode("new"); setStep(0); setErr(""); setMsg(""); }}
+            className="flex w-full items-start gap-3 rounded-2xl border border-primary bg-primary/5 p-5 text-left transition hover:border-primary brand-glow">
+            <Server className="mt-0.5 size-5 shrink-0 text-primary" />
+            <span>
+              <span className="block font-medium">Set up a new system</span>
+              <span className="block text-sm text-muted-foreground">Create the admin account and configure a mailbox, polling, notifications, and branding. The usual path.</span>
+            </span>
+          </button>
+          <button type="button" onClick={() => { setMode("restore"); setErr(""); setMsg(""); }}
+            className="flex w-full items-start gap-3 rounded-2xl border border-border bg-card p-5 text-left transition hover:border-primary/40">
+            <RotateCcw className="mt-0.5 size-5 shrink-0 text-primary" />
+            <span>
+              <span className="block font-medium">Restore from a backup</span>
+              <span className="block text-sm text-muted-foreground">Already have a backup zip from another dashboard? Rebuild this instance from it, no setup needed.</span>
+            </span>
+          </button>
         </div>
-      ) : (<>
+      )}
+
+      {mode === "restore" && (
+        <div className="space-y-4">
+          <p className="mb-2 text-sm text-muted-foreground">Restore this instance from a backup taken on another dashboard. The entire data volume, including the admin login, is replaced with the backup&apos;s contents.</p>
+          <RestoreCard />
+          <button type="button" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMode("choose")}>&larr; Back</button>
+        </div>
+      )}
+
+      {mode === "new" && (<>
       <p className="mb-6 text-sm text-muted-foreground">Step {step + 1} of {STEP_COUNT}</p>
       <div className="card-elev space-y-3 rounded-2xl border border-border bg-card p-6">
         {step === 0 && (<>
@@ -378,8 +403,8 @@ export default function SetupWizard() {
         </div>
       </div>
       {step === 0 && (
-        <button type="button" className="mt-4 inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => { setRestoreMode(true); setErr(""); setMsg(""); }}>
-          <RotateCcw className="size-4" /> Restore from a backup instead
+        <button type="button" className="mt-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground" onClick={() => { setMode("choose"); setErr(""); setMsg(""); }}>
+          &larr; Back to start
         </button>
       )}
       </>)}

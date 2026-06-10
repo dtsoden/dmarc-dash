@@ -50,7 +50,11 @@ export function RestoreCard({ className = "" }: { className?: string }) {
       setStatus("restarting");
       await waitForRestart();
       // Whether or not the poll confirmed, the old session is invalid now; go to login.
-      window.location.href = "/login";
+      // Use a unique, cache-busting URL so the browser fetches a freshly rendered page
+      // instead of serving the pre-restore HTML from cache. The theme (light/dark) and
+      // brand colors are baked into the server-rendered markup from the database, so a
+      // cached page would show the old instance's theme until a manual hard refresh.
+      window.location.replace(`/login?restored=${Date.now()}`);
     } catch (e) {
       setStatus("error");
       setErr(e instanceof Error ? e.message : "Restore failed");
