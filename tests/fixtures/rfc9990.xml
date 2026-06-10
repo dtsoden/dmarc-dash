@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feedback xmlns="urn:ietf:params:xml:ns:dmarc-2.0">
+  <version>1.0</version>
+  <report_metadata>
+    <org_name>yahoo.com</org_name>
+    <email>dmarchelp@yahoo.com</email>
+    <report_id>yh-9990-1</report_id>
+    <date_range><begin>1717200000</begin><end>1717286400</end></date_range>
+    <generator>Yahoo DMARC 2.0</generator>
+  </report_metadata>
+  <policy_published>
+    <domain>example.com</domain><p>reject</p><sp>reject</sp><np>reject</np>
+    <adkim>r</adkim><aspf>r</aspf><discovery_method>treewalk</discovery_method><testing>n</testing>
+  </policy_published>
+  <record>
+    <row>
+      <source_ip>2001:4860:4860::8888</source_ip><count>3</count>
+      <policy_evaluated><disposition>pass</disposition><dkim>pass</dkim><spf>pass</spf></policy_evaluated>
+    </row>
+    <identifiers><header_from>example.com</header_from></identifiers>
+    <auth_results>
+      <dkim><domain>example.com</domain><selector>sel</selector><result>pass</result></dkim>
+      <spf><domain>example.com</domain><result>pass</result></spf>
+    </auth_results>
+  </record>
+</feedback>
