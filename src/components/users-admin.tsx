@@ -10,7 +10,7 @@ interface AppUser {
 const input = "rounded-md border px-2 py-1 text-sm";
 const ROLES: Role[] = ["admin", "analyst", "viewer"];
 
-export function UsersAdmin() {
+export function UsersAdmin({ emailConfigured = true }: { emailConfigured?: boolean }) {
   const [users, setUsers] = useState<AppUser[]>([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -74,20 +74,18 @@ export function UsersAdmin() {
 
       <section className="card-elev space-y-3 rounded-2xl border border-border bg-card p-5">
         <h2 className="font-display font-medium">Add user</h2>
-        <p className="text-xs text-muted-foreground">Leave the password blank to email a secure set-password link (recommended), no password is ever sent by email. If email isn&apos;t configured, you&apos;ll get a one-time password to share.</p>
-        <div className="flex flex-wrap items-end gap-2">
+        <p className="text-xs text-muted-foreground">The new user is emailed a single-use link (valid 7 days) to set their own password. No password is sent by email.</p>
+        <fieldset disabled={!emailConfigured} className="flex flex-wrap items-end gap-2 disabled:opacity-50">
           <input className={input} placeholder="Username" value={form.username}
             onChange={(e) => setForm((s) => ({ ...s, username: e.target.value }))} />
           <input className={input} placeholder="Email" value={form.email}
             onChange={(e) => setForm((s) => ({ ...s, email: e.target.value }))} />
-          <input className={input} type="password" placeholder="Password (optional)" value={form.password}
-            onChange={(e) => setForm((s) => ({ ...s, password: e.target.value }))} />
           <select className={input} value={form.role}
             onChange={(e) => setForm((s) => ({ ...s, role: e.target.value as Role }))}>
             {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
           </select>
-          <button type="button" className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground" onClick={addUser}>Add user</button>
-        </div>
+          <button type="button" className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-60" onClick={addUser} disabled={!emailConfigured}>Send invite</button>
+        </fieldset>
       </section>
 
       <div className="overflow-x-auto rounded-xl border">
