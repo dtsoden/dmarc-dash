@@ -46,3 +46,8 @@ next-env.d.ts
 /data/app.key
 .env
 .env.local
+
+# SQLite runtime sidecars and app key (never commit data)
+/data/*.db-wal
+/data/*.db-shm
+/data/app.key
