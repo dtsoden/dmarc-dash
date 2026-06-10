@@ -13,6 +13,7 @@ const ROLES: Role[] = ["admin", "analyst", "viewer"];
 export function UsersAdmin() {
   const [users, setUsers] = useState<AppUser[]>([]);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [form, setForm] = useState({ username: "", email: "", password: "", role: "viewer" as Role });
 
   async function load() {
@@ -23,17 +24,21 @@ export function UsersAdmin() {
   useEffect(() => { void load(); }, []);
 
   async function addUser() {
-    setError("");
+    setError(""); setNotice("");
     const r = await fetch("/api/users", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(form),
     });
+    const data = await r.json().catch(() => ({}));
     if (r.ok) {
       setForm({ username: "", email: "", password: "", role: "viewer" });
+      if (data.invited) setNotice(`Invite email sent to ${data.email}. They set their own password via the link (valid 7 days).`);
+      else if (data.tempPassword) setNotice(`User created. Email isn't configured, share this one-time password securely: ${data.tempPassword}`);
+      else setNotice("User created. They'll be prompted to change the password you set on first sign-in.");
       await load();
     } else {
-      setError((await r.json()).error ?? "Failed to add user");
+      setError(data.error ?? "Failed to add user");
     }
   }
 
@@ -65,21 +70,23 @@ export function UsersAdmin() {
   return (
     <div className="space-y-6">
       {error && <p className="rounded-md border border-destructive bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
+      {notice && <p className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300">{notice}</p>}
 
-      <section className="space-y-3 rounded-xl border bg-background p-4">
-        <h2 className="font-medium">Add user</h2>
+      <section className="card-elev space-y-3 rounded-2xl border border-border bg-card p-5">
+        <h2 className="font-display font-medium">Add user</h2>
+        <p className="text-xs text-muted-foreground">Leave the password blank to email a secure set-password link (recommended), no password is ever sent by email. If email isn&apos;t configured, you&apos;ll get a one-time password to share.</p>
         <div className="flex flex-wrap items-end gap-2">
           <input className={input} placeholder="Username" value={form.username}
             onChange={(e) => setForm((s) => ({ ...s, username: e.target.value }))} />
           <input className={input} placeholder="Email" value={form.email}
             onChange={(e) => setForm((s) => ({ ...s, email: e.target.value }))} />
-          <input className={input} type="password" placeholder="Temp password (min 8)" value={form.password}
+          <input className={input} type="password" placeholder="Password (optional)" value={form.password}
             onChange={(e) => setForm((s) => ({ ...s, password: e.target.value }))} />
           <select className={input} value={form.role}
             onChange={(e) => setForm((s) => ({ ...s, role: e.target.value as Role }))}>
             {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
           </select>
-          <button type="button" className="rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground" onClick={addUser}>Add</button>
+          <button type="button" className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground" onClick={addUser}>Add user</button>
         </div>
       </section>
 

@@ -2,14 +2,15 @@ import { getDb } from "@/lib/db/connection";
 import { generateResetToken, hashToken } from "./tokens";
 import { setPassword } from "./users";
 
-const TTL = 3600; // 1 hour
+const TTL = 3600; // 1 hour (password reset)
+export const INVITE_TTL = 7 * 24 * 3600; // 7 days (new-user set-password invite)
 
-export function createReset(userId: number, dbPath?: string): string | null {
+export function createReset(userId: number, dbPath?: string, ttlSeconds: number = TTL): string | null {
   const { token, tokenHash } = generateResetToken();
   const now = Math.floor(Date.now() / 1000);
   getDb(dbPath).prepare(
     `INSERT INTO password_reset (user_id,token_hash,expires_at) VALUES (?,?,?)`
-  ).run(userId, tokenHash, now + TTL);
+  ).run(userId, tokenHash, now + ttlSeconds);
   return token;
 }
 
