@@ -132,7 +132,13 @@ export async function testSourceById(id: number, dbPath?: string, keyPath?: stri
 // One-time migration of legacy flat single-source settings into the first table row.
 export function migrateLegacySource(dbPath?: string, keyPath?: string): void {
   if (countSources(dbPath) > 0) return;
-  const provider = getSetting<string>("mailbox_provider", dbPath, keyPath);
+  let provider = getSetting<string>("mailbox_provider", dbPath, keyPath);
+  // Older installs may have the credentials but never a provider flag: infer it.
+  if (provider !== "graph" && provider !== "imap") {
+    if (getSetting<string>("graph_tenant_id", dbPath, keyPath) && getSetting<string>("mailbox_upn", dbPath, keyPath)) provider = "graph";
+    else if (getSetting<string>("imap_host", dbPath, keyPath) && getSetting<string>("imap_username", dbPath, keyPath)) provider = "imap";
+    else return;
+  }
   if (provider === "graph") {
     const mailboxUpn = getSetting<string>("mailbox_upn", dbPath, keyPath);
     if (!mailboxUpn) return;

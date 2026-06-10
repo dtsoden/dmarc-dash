@@ -56,4 +56,17 @@ describe("mailbox source store", () => {
     migrateLegacySource(TMP, KEY);
     expect(countSources(TMP)).toBe(1);
   });
+
+  it("infers the provider from credentials when mailbox_provider is missing", () => {
+    migrate(TMP);
+    // No mailbox_provider set, but Graph creds present (older install shape).
+    setSetting("mailbox_upn", "dmarc@beaconspec.com", TMP, KEY);
+    setSetting("graph_tenant_id", "t", TMP, KEY);
+    setSetting("graph_client_id", "c", TMP, KEY);
+    setSetting("graph_client_secret", "s", TMP, KEY);
+    migrateLegacySource(TMP, KEY);
+    expect(countSources(TMP)).toBe(1);
+    expect(listSourcesSafe(TMP)[0].provider).toBe("graph");
+    expect(listSourcesSafe(TMP)[0].domain).toBe("beaconspec.com");
+  });
 });

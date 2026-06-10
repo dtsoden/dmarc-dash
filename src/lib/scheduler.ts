@@ -96,6 +96,7 @@ export function startScheduler() {
   if (started) return;
   started = true;
   migrate();
+  try { migrateLegacySource(); } catch (e) { console.error("[scheduler] legacy source migration failed:", e); }
   reschedulePoll();
   rescheduleDigests();
   console.log("[scheduler] started");
