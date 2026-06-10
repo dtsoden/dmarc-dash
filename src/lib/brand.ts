@@ -4,8 +4,8 @@ import { getSetting } from "@/lib/settings";
 
 export interface Brand {
   appName: string;
-  primary: string;
-  accent: string;
+  colorLight: string;  // brand color for light mode
+  colorDark: string;   // brand color for dark mode
   logoExt: string;     // "" when no custom logo (use wordmark)
   faviconExt: string;  // "" when no custom favicon
 }
@@ -13,11 +13,23 @@ export interface Brand {
 export function getBrand(): Brand {
   return {
     appName: getSetting<string>("brand_app_name") || "DMARC Dashboard",
-    primary: getSetting<string>("brand_primary") || "#0093a2",
-    accent: getSetting<string>("brand_accent") || "#00df7e",
+    colorLight: getSetting<string>("brand_color_light") || "#0093a2",
+    colorDark: getSetting<string>("brand_color_dark") || "#00df7e",
     logoExt: getSetting<string>("brand_logo_ext") || "",
     faviconExt: getSetting<string>("brand_favicon_ext") || "",
   };
+}
+
+// Readable text color (near-black or white) for a given background hex, by luminance.
+export function readableText(hex: string): string {
+  const h = (hex || "").replace("#", "");
+  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  if (full.length !== 6) return "#ffffff";
+  const r = parseInt(full.slice(0, 2), 16) / 255;
+  const g = parseInt(full.slice(2, 4), 16) / 255;
+  const b = parseInt(full.slice(4, 6), 16) / 255;
+  const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  return lum > 0.6 ? "#0b1a14" : "#ffffff";
 }
 
 export function brandDir(): string {
@@ -27,7 +39,6 @@ export function brandFilePath(kind: "logo" | "favicon", ext: string): string {
   return path.join(brandDir(), `${kind}.${ext}`);
 }
 
-// Hex (#rgb or #rrggbb) validation for the color pickers.
 export function isHexColor(v: string): boolean {
   return /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(v.trim());
 }

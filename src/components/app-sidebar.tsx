@@ -36,7 +36,7 @@ export function AppSidebar({ role, username, appName, logoExt }: { role: Role; u
           <img src="/api/brand/logo" alt={appName} className="h-8 w-auto max-w-[170px] object-contain" />
         ) : (
           <>
-            <span className="grid h-9 w-9 place-items-center rounded-xl bg-sidebar-primary text-sidebar-primary-foreground shadow-sm">
+            <span className="grid h-9 w-9 place-items-center rounded-xl bg-primary text-primary-foreground shadow-sm">
               <ShieldCheck className="h-5 w-5" />
             </span>
             <span className="font-display text-[15px] font-bold tracking-tight text-white">{appName}</span>

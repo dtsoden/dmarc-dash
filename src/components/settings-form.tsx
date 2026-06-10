@@ -6,6 +6,15 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 const MASK = "********";
 const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 
+// Readable text (near-black or white) on a given hex, matching the server's logic.
+function previewText(hex: string): string {
+  const h = (hex || "").replace("#", "");
+  const f = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  if (f.length !== 6) return "#ffffff";
+  const r = parseInt(f.slice(0, 2), 16) / 255, g = parseInt(f.slice(2, 4), 16) / 255, b = parseInt(f.slice(4, 6), 16) / 255;
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) > 0.6 ? "#0b1a14" : "#ffffff";
+}
+
 interface SettingsState {
   mailbox_provider: string;
   graph_tenant_id: string;
@@ -27,8 +36,8 @@ interface SettingsState {
   digest_monthly_cron: string;
   maxmind_license_key: string;
   brand_app_name: string;
-  brand_primary: string;
-  brand_accent: string;
+  brand_color_light: string;
+  brand_color_dark: string;
   brand_logo_ext: string;
   brand_favicon_ext: string;
 }
@@ -40,7 +49,7 @@ const EMPTY: SettingsState = {
   poll_interval_minutes: 15, delete_mode: "safe",
   mailersend_token: "", mailersend_from: "", digest_recipients: "",
   digest_weekly_cron: "", digest_monthly_cron: "", maxmind_license_key: "",
-  brand_app_name: "DMARC Dashboard", brand_primary: "#0093a2", brand_accent: "#00df7e",
+  brand_app_name: "DMARC Dashboard", brand_color_light: "#0093a2", brand_color_dark: "#00df7e",
   brand_logo_ext: "", brand_favicon_ext: "",
 };
 
@@ -87,8 +96,8 @@ export function SettingsForm() {
           digest_monthly_cron: d.digest_monthly_cron ?? "",
           maxmind_license_key: d.maxmind_license_key ?? "",
           brand_app_name: d.brand_app_name ?? "DMARC Dashboard",
-          brand_primary: d.brand_primary ?? "#0093a2",
-          brand_accent: d.brand_accent ?? "#00df7e",
+          brand_color_light: d.brand_color_light ?? "#0093a2",
+          brand_color_dark: d.brand_color_dark ?? "#00df7e",
           brand_logo_ext: d.brand_logo_ext ?? "",
           brand_favicon_ext: d.brand_favicon_ext ?? "",
         });
@@ -122,8 +131,8 @@ export function SettingsForm() {
   }
 
   async function saveBranding() {
-    if (f.brand_primary && !HEX_RE.test(f.brand_primary)) { setMsg("Primary color must be a hex value like #0093a2."); return; }
-    if (f.brand_accent && !HEX_RE.test(f.brand_accent)) { setMsg("Accent color must be a hex value like #00df7e."); return; }
+    if (f.brand_color_light && !HEX_RE.test(f.brand_color_light)) { setMsg("Light brand color must be a hex value like #0093a2."); return; }
+    if (f.brand_color_dark && !HEX_RE.test(f.brand_color_dark)) { setMsg("Dark brand color must be a hex value like #00df7e."); return; }
     const ok = await save();
     if (ok) location.reload(); // re-render runtime theme + document title
   }
@@ -331,22 +340,32 @@ export function SettingsForm() {
             <h2 className="font-display font-medium">White-label</h2>
             <div><label className={labelCls}>Application name</label>
               <input className={input} value={f.brand_app_name} onChange={(e) => set("brand_app_name", e.target.value)} /></div>
-            <div className="flex gap-4">
-              <div className="flex-1">
-                <label className={labelCls}>Primary color</label>
-                <div className="flex items-center gap-2">
-                  <input type="color" className="h-10 w-12 rounded-md border" value={HEX_RE.test(f.brand_primary) ? f.brand_primary : "#0093a2"} onChange={(e) => set("brand_primary", e.target.value)} />
-                  <input className={input + " font-mono"} value={f.brand_primary} onChange={(e) => set("brand_primary", e.target.value)} />
-                </div>
-              </div>
-              <div className="flex-1">
-                <label className={labelCls}>Accent color</label>
-                <div className="flex items-center gap-2">
-                  <input type="color" className="h-10 w-12 rounded-md border" value={HEX_RE.test(f.brand_accent) ? f.brand_accent : "#00df7e"} onChange={(e) => set("brand_accent", e.target.value)} />
-                  <input className={input + " font-mono"} value={f.brand_accent} onChange={(e) => set("brand_accent", e.target.value)} />
-                </div>
-              </div>
+
+            <div>
+              <label className={labelCls}>Brand color</label>
+              <p className="mb-2 text-xs text-muted-foreground">Drives buttons, active tabs, links, focus rings, and the logo. Set one per mode; button text auto-contrasts. The sidebar is always dark, so the logo uses the active mode&apos;s color.</p>
+              <Tabs defaultValue="light" className="w-full">
+                <TabsList>
+                  <TabsTrigger value="light">Light mode</TabsTrigger>
+                  <TabsTrigger value="dark">Dark mode</TabsTrigger>
+                </TabsList>
+                <TabsContent value="light" className="pt-3">
+                  <div className="flex items-center gap-2">
+                    <input type="color" className="h-10 w-12 rounded-md border" value={HEX_RE.test(f.brand_color_light) ? f.brand_color_light : "#0093a2"} onChange={(e) => set("brand_color_light", e.target.value)} />
+                    <input className={input + " font-mono"} value={f.brand_color_light} onChange={(e) => set("brand_color_light", e.target.value)} />
+                    <span className="rounded-md px-3 py-1.5 text-sm font-medium" style={{ background: HEX_RE.test(f.brand_color_light) ? f.brand_color_light : "#0093a2", color: previewText(f.brand_color_light) }}>Button</span>
+                  </div>
+                </TabsContent>
+                <TabsContent value="dark" className="pt-3">
+                  <div className="flex items-center gap-2">
+                    <input type="color" className="h-10 w-12 rounded-md border" value={HEX_RE.test(f.brand_color_dark) ? f.brand_color_dark : "#00df7e"} onChange={(e) => set("brand_color_dark", e.target.value)} />
+                    <input className={input + " font-mono"} value={f.brand_color_dark} onChange={(e) => set("brand_color_dark", e.target.value)} />
+                    <span className="rounded-md px-3 py-1.5 text-sm font-medium" style={{ background: HEX_RE.test(f.brand_color_dark) ? f.brand_color_dark : "#00df7e", color: previewText(f.brand_color_dark) }}>Button</span>
+                  </div>
+                </TabsContent>
+              </Tabs>
             </div>
+
             <div className="flex items-center gap-3">
               <button type="button" className={btnPrimary} onClick={saveBranding}>Save and reload</button>
               {msg && <p className="text-sm">{msg}</p>}
