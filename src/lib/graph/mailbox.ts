@@ -1,4 +1,4 @@
-import type { GraphClient } from "./client";
+import type { MailSource } from "@/lib/mailbox/source";
 import type { IngestResult } from "@/lib/ingest/ingest";
 import { ingestAttachment } from "@/lib/ingest/ingest";
 
@@ -24,7 +24,7 @@ export interface MailboxResult {
 }
 
 export async function processMailbox(
-  client: GraphClient,
+  client: MailSource,
   opts: { deleteMode: "safe" | "hard"; dbPath?: string },
   ingest: IngestFn = ingestAttachment,
 ): Promise<MailboxResult> {

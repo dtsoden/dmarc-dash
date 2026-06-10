@@ -7,10 +7,20 @@ interface Def { type: SettingType; default: unknown }
 
 export const SETTING_DEFS: Record<string, Def> = {
   setup_complete:        { type: "bool",   default: false },
+  // Mailbox source: "" (none) | "graph" | "imap". Mutually exclusive.
+  mailbox_provider:      { type: "string", default: "" },
+  // Microsoft Graph (365)
   graph_tenant_id:       { type: "string", default: "" },
   graph_client_id:       { type: "string", default: "" },
   graph_client_secret:   { type: "secret", default: "" },
   mailbox_upn:           { type: "string", default: "" },
+  // IMAP (Gmail/Workspace, Fastmail, generic) - basic auth / app password
+  imap_host:             { type: "string", default: "" },
+  imap_port:             { type: "int",    default: 993 },
+  imap_username:         { type: "string", default: "" },
+  imap_password:         { type: "secret", default: "" },
+  imap_tls:              { type: "bool",   default: true },
+  imap_folder:           { type: "string", default: "INBOX" },
   poll_interval_minutes: { type: "int",    default: 15 },
   delete_mode:           { type: "string", default: "safe" },
   mailersend_token:      { type: "secret", default: "" },
