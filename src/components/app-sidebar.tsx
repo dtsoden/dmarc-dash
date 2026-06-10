@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Globe2, ShieldCheck, Gavel, FileText, ScrollText, Settings, Users, LogOut } from "lucide-react";
+import { LayoutDashboard, Globe2, ShieldCheck, Gavel, FileText, ScrollText, Network, Settings, Users, LogOut } from "lucide-react";
 import type { Role } from "@/lib/auth/session";
 
 const groups = [
@@ -13,6 +13,7 @@ const groups = [
   ]},
   { label: "Reports", items: [
     { href: "/reports", label: "Reports", icon: FileText },
+    { href: "/dns", label: "DNS Report", icon: Network },
     { href: "/ingest-log", label: "Ingest Log", icon: ScrollText },
   ]},
 ];

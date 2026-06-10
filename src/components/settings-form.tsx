@@ -198,11 +198,11 @@ export function SettingsForm() {
             <TabsList>
               <TabsTrigger value="graph" disabled={hasProvider && provider !== "graph"}>
                 <Mail /> Microsoft 365
-                {provider === "graph" && <span className="ml-1.5 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">ACTIVE</span>}
+                {provider === "graph" && <span className="ml-1.5 rounded-full bg-white/25 px-1.5 py-0.5 text-[10px] font-semibold text-white">ACTIVE</span>}
               </TabsTrigger>
               <TabsTrigger value="imap" disabled={hasProvider && provider !== "imap"}>
                 <Server /> IMAP
-                {provider === "imap" && <span className="ml-1.5 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">ACTIVE</span>}
+                {provider === "imap" && <span className="ml-1.5 rounded-full bg-white/25 px-1.5 py-0.5 text-[10px] font-semibold text-white">ACTIVE</span>}
               </TabsTrigger>
             </TabsList>
 

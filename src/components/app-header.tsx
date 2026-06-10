@@ -10,6 +10,7 @@ const TITLES: Record<string, string> = {
   "/authentication": "Authentication",
   "/policy": "Policy",
   "/reports": "Reports",
+  "/dns": "DNS Report",
   "/ingest-log": "Ingest Log",
   "/settings": "Settings",
   "/users": "Users",

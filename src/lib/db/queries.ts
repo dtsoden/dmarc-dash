@@ -127,3 +127,20 @@ export function droppedFieldsSummary(dbPath?: string) {
   for (const r of rows) for (const f of JSON.parse(r.dropped_fields) as string[]) counts.set(f, (counts.get(f) ?? 0) + 1);
   return Array.from(counts, ([field, count]) => ({ field, count })).sort((a, b) => b.count - a.count);
 }
+
+// DKIM (selector, signing-domain) pairs observed in ingested reports. Lets the DNS
+// report look up the actual DKIM keys this domain's mail has been signed with.
+export function observedDkimPairs(dbPath: string | undefined, headerFrom?: string): { selector: string; domain: string }[] {
+  const db = getDb(dbPath);
+  if (headerFrom) {
+    return db.prepare(`
+      SELECT DISTINCT ad.selector AS selector, ad.domain AS domain
+      FROM auth_result_dkim ad JOIN record r ON r.id = ad.record_id
+      WHERE ad.selector IS NOT NULL AND ad.selector <> '' AND ad.domain IS NOT NULL AND r.header_from = ?
+      ORDER BY ad.domain, ad.selector`).all(headerFrom) as any[];
+  }
+  return db.prepare(`
+    SELECT DISTINCT selector, domain FROM auth_result_dkim
+    WHERE selector IS NOT NULL AND selector <> '' AND domain IS NOT NULL
+    ORDER BY domain, selector`).all() as any[];
+}
