@@ -4,6 +4,7 @@ import { getSetting } from "@/lib/settings";
 import { GraphAuth } from "@/lib/graph/auth";
 import { GraphClient } from "@/lib/graph/client";
 import { processMailbox } from "@/lib/graph/mailbox";
+import { sendDigest } from "@/lib/email/send-digest";
 
 let pollTask: ScheduledTask | null = null;
 let weeklyTask: ScheduledTask | null = null;
@@ -62,7 +63,18 @@ export function reschedulePoll() {
 export function rescheduleDigests() {
   weeklyTask?.stop(); monthlyTask?.stop();
   weeklyTask = null; monthlyTask = null;
-  // Task D.4 replaces this stub to wire sendDigest to digest_weekly_cron / digest_monthly_cron.
+  if (!getSetting<boolean>("setup_complete")) return;
+  if (!getSetting<string>("mailersend_token")) {
+    console.log("[scheduler] mailersend_token not set; digests disabled");
+    return;
+  }
+  const weekly = getSetting<string>("digest_weekly_cron");
+  const monthly = getSetting<string>("digest_monthly_cron");
+  if (cron.validate(weekly))
+    weeklyTask = cron.schedule(weekly, () => { void sendDigest("weekly", Math.floor(Date.now() / 1000)); });
+  if (cron.validate(monthly))
+    monthlyTask = cron.schedule(monthly, () => { void sendDigest("monthly", Math.floor(Date.now() / 1000)); });
+  console.log(`[scheduler] digests scheduled (weekly "${weekly}", monthly "${monthly}")`);
 }
 
 // Re-apply both schedules after settings change (wizard finish, Settings save).
