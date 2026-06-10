@@ -51,3 +51,7 @@ next-env.d.ts
 /data/*.db-wal
 /data/*.db-shm
 /data/app.key
+
+# never commit dropped secrets
+masterkey.txt
+*.pem
