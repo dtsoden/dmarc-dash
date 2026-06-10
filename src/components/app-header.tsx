@@ -26,7 +26,7 @@ export function AppHeader({ role }: { role: Role }) {
       <h1 className="font-display text-lg font-semibold tracking-tight">{title}</h1>
       <div className="ml-auto flex items-center gap-2">
         {canPoll && <PollNowButton />}
-        <HelpLink href="/docs" />
+        <HelpLink href="/docs" variant="subtle" />
         <ThemeToggle />
       </div>
     </header>
