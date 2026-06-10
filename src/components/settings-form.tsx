@@ -1,10 +1,10 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
-import { Mail, Server, Inbox, Clock, Send, Globe, Palette, Trash2, Upload, AlertTriangle } from "lucide-react";
+import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { Mail, Server, Inbox, Clock, Send, Globe, Palette, Trash2, Upload, Plus, CheckCircle, AlertTriangle, Pencil } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
-const MASK = "********";
 const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
+const DOMAIN_RE = /^(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))+$/i;
 
 // Readable text (near-black or white) on a given hex, matching the server's logic.
 function previewText(hex: string): string {
@@ -16,17 +16,6 @@ function previewText(hex: string): string {
 }
 
 interface SettingsState {
-  mailbox_provider: string;
-  graph_tenant_id: string;
-  graph_client_id: string;
-  graph_client_secret: string;
-  mailbox_upn: string;
-  imap_host: string;
-  imap_port: number;
-  imap_username: string;
-  imap_password: string;
-  imap_tls: boolean;
-  imap_folder: string;
   poll_interval_minutes: number;
   delete_mode: string;
   mailersend_token: string;
@@ -44,9 +33,6 @@ interface SettingsState {
 }
 
 const EMPTY: SettingsState = {
-  mailbox_provider: "",
-  graph_tenant_id: "", graph_client_id: "", graph_client_secret: "", mailbox_upn: "",
-  imap_host: "", imap_port: 993, imap_username: "", imap_password: "", imap_tls: true, imap_folder: "INBOX",
   poll_interval_minutes: 15, delete_mode: "safe",
   mailersend_token: "", mailersend_from: "", digest_recipients: "",
   digest_weekly_cron: "", digest_monthly_cron: "", maxmind_license_key: "",
@@ -64,7 +50,6 @@ export function SettingsForm() {
   const [f, setF] = useState<SettingsState>(EMPTY);
   const [loaded, setLoaded] = useState(false);
   const [msg, setMsg] = useState("");
-  const [testMsg, setTestMsg] = useState("");
   const [brandTab, setBrandTab] = useState<"light" | "dark">("light");
   const logoInput = useRef<HTMLInputElement>(null);
   const faviconInput = useRef<HTMLInputElement>(null);
@@ -78,17 +63,6 @@ export function SettingsForm() {
       .then((d) => {
         const recipients = Array.isArray(d.digest_recipients) ? d.digest_recipients.join(", ") : "";
         setF({
-          mailbox_provider: d.mailbox_provider ?? "",
-          graph_tenant_id: d.graph_tenant_id ?? "",
-          graph_client_id: d.graph_client_id ?? "",
-          graph_client_secret: d.graph_client_secret ?? "",
-          mailbox_upn: d.mailbox_upn ?? "",
-          imap_host: d.imap_host ?? "",
-          imap_port: Number(d.imap_port ?? 993),
-          imap_username: d.imap_username ?? "",
-          imap_password: d.imap_password ?? "",
-          imap_tls: d.imap_tls ?? true,
-          imap_folder: d.imap_folder ?? "INBOX",
           poll_interval_minutes: Number(d.poll_interval_minutes ?? 15),
           delete_mode: d.delete_mode ?? "safe",
           mailersend_token: d.mailersend_token ?? "",
@@ -117,7 +91,6 @@ export function SettingsForm() {
     const body: Record<string, unknown> = {
       ...f,
       poll_interval_minutes: Number(f.poll_interval_minutes),
-      imap_port: Number(f.imap_port),
       digest_recipients: f.digest_recipients.split(",").map((s) => s.trim()).filter(Boolean),
       ...extra,
     };
@@ -140,34 +113,6 @@ export function SettingsForm() {
     if (ok) location.reload(); // re-render runtime theme + document title
   }
 
-  async function testConnection() {
-    setTestMsg("Testing connection...");
-    try {
-      if (f.mailbox_provider === "graph") {
-        const r = await fetch("/api/setup/test-graph", { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tenantId: f.graph_tenant_id.trim(), clientId: f.graph_client_id.trim(), clientSecret: f.graph_client_secret, mailboxUpn: f.mailbox_upn.trim() }) }).then((r) => r.json());
-        setTestMsg(r.ok ? "Connected: the mailbox is reachable." : `Connection failed: ${r.error}`);
-      } else if (f.mailbox_provider === "imap") {
-        const r = await fetch("/api/setup/test-imap", { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ host: f.imap_host.trim(), port: Number(f.imap_port), username: f.imap_username.trim(), password: f.imap_password, tls: f.imap_tls, folder: f.imap_folder.trim() || "INBOX" }) }).then((r) => r.json());
-        setTestMsg(r.ok ? "Connected: the mailbox is reachable." : `Connection failed: ${r.error}`);
-      }
-    } catch { setTestMsg("Connection test failed to reach the server."); }
-  }
-
-  async function clearSource() {
-    if (!confirm("Clear the mailbox source configuration? This blanks both Graph and IMAP credentials so you can switch providers.")) return;
-    setMsg("Clearing...");
-    const r = await fetch("/api/settings/clear-source", { method: "POST" });
-    if (r.ok) { location.reload(); } else { setMsg("Failed to clear source"); }
-  }
-
-  // Save the current provider's source settings (used when no provider is set yet, or to update an existing one).
-  async function saveSource(provider?: string) {
-    const ok = await save(provider ? { mailbox_provider: provider } : undefined);
-    if (ok) location.reload();
-  }
-
   async function uploadBrand(kind: "logo" | "favicon", file: File) {
     setMsg(`Uploading ${kind}...`);
     const fd = new FormData();
@@ -183,9 +128,6 @@ export function SettingsForm() {
 
   if (!loaded) return <p className="text-sm text-muted-foreground">Loading...</p>;
 
-  const provider = f.mailbox_provider;
-  const hasProvider = provider === "graph" || provider === "imap";
-
   return (
     <Tabs defaultValue="source" className="w-full">
       <TabsList className="flex flex-wrap">
@@ -198,94 +140,7 @@ export function SettingsForm() {
 
       {/* MAILBOX MONITORING */}
       <TabsContent value="source" className="pt-4">
-        <div className="space-y-4">
-          <p className="text-sm text-muted-foreground">
-            The mailbox the dashboard monitors for DMARC aggregate reports. Choose one source:
-            {hasProvider
-              ? <> currently <span className="font-medium text-foreground">{provider === "graph" ? "Microsoft 365" : "IMAP"}</span>. The other is locked until you clear it below.</>
-              : <> Microsoft 365 (Graph) for Office 365 tenants, or IMAP for Gmail/Workspace and others.</>}
-          </p>
-
-          <Tabs defaultValue={provider === "imap" ? "imap" : "graph"} className="w-full">
-            <TabsList>
-              <TabsTrigger value="graph" disabled={hasProvider && provider !== "graph"}>
-                <Mail /> Microsoft 365
-                {provider === "graph" && <span className="ml-1.5 rounded-full bg-white/25 px-1.5 py-0.5 text-[10px] font-semibold text-white">ACTIVE</span>}
-              </TabsTrigger>
-              <TabsTrigger value="imap" disabled={hasProvider && provider !== "imap"}>
-                <Server /> IMAP
-                {provider === "imap" && <span className="ml-1.5 rounded-full bg-white/25 px-1.5 py-0.5 text-[10px] font-semibold text-white">ACTIVE</span>}
-              </TabsTrigger>
-            </TabsList>
-
-            {/* Microsoft 365 sub-tab */}
-            <TabsContent value="graph" className="pt-4">
-              <section className={card}>
-                <h2 className="font-display font-medium">Microsoft 365 (Microsoft Graph)</h2>
-                <p className="text-xs text-muted-foreground">App-only access to a 365 mailbox. See docs/SETUP-ENTRA.md for the one-time Entra app registration.</p>
-                <div><label className={labelCls}>Tenant ID</label>
-                  <input className={input} value={f.graph_tenant_id} onChange={(e) => set("graph_tenant_id", e.target.value)} /></div>
-                <div><label className={labelCls}>Client ID</label>
-                  <input className={input} value={f.graph_client_id} onChange={(e) => set("graph_client_id", e.target.value)} /></div>
-                <div><label className={labelCls}>Client secret</label>
-                  <input className={input} type="password" value={f.graph_client_secret} onChange={(e) => set("graph_client_secret", e.target.value)} /></div>
-                <div><label className={labelCls}>Mailbox (UPN)</label>
-                  <input className={input} value={f.mailbox_upn} onChange={(e) => set("mailbox_upn", e.target.value)} /></div>
-                <div className="flex flex-wrap items-center gap-2">
-                  {provider === "graph"
-                    ? <><button type="button" className={btnPrimary} onClick={() => saveSource()}>Save</button>
-                        <button type="button" className={btnGhost} onClick={testConnection}>Test connection</button></>
-                    : <button type="button" className={btnPrimary} onClick={() => saveSource("graph")}>Use Microsoft 365</button>}
-                </div>
-              </section>
-            </TabsContent>
-
-            {/* IMAP sub-tab */}
-            <TabsContent value="imap" className="pt-4">
-              <section className={card}>
-                <h2 className="font-display font-medium">IMAP (Gmail, Workspace, Fastmail, other)</h2>
-                <p className="text-xs text-muted-foreground">Gmail/Workspace need an app password (with 2FA). Host examples: imap.gmail.com:993, imap.fastmail.com:993.</p>
-                <div><label className={labelCls}>Host</label>
-                  <input className={input} value={f.imap_host} onChange={(e) => set("imap_host", e.target.value)} /></div>
-                <div><label className={labelCls}>Port</label>
-                  <input className={input} type="number" min={1} max={65535} value={f.imap_port} onChange={(e) => set("imap_port", Number(e.target.value))} /></div>
-                <div><label className={labelCls}>Username</label>
-                  <input className={input} value={f.imap_username} onChange={(e) => set("imap_username", e.target.value)} /></div>
-                <div><label className={labelCls}>Password (app password)</label>
-                  <input className={input} type="password" value={f.imap_password} onChange={(e) => set("imap_password", e.target.value)} /></div>
-                <div><label className={labelCls}>Encryption</label>
-                  <select className={input} value={f.imap_tls ? "tls" : "plain"} onChange={(e) => set("imap_tls", e.target.value === "tls")}>
-                    <option value="tls">TLS / SSL (recommended)</option>
-                    <option value="plain">None</option>
-                  </select></div>
-                <div><label className={labelCls}>Folder</label>
-                  <input className={input} value={f.imap_folder} onChange={(e) => set("imap_folder", e.target.value)} /></div>
-                <div className="flex flex-wrap items-center gap-2">
-                  {provider === "imap"
-                    ? <><button type="button" className={btnPrimary} onClick={() => saveSource()}>Save</button>
-                        <button type="button" className={btnGhost} onClick={testConnection}>Test connection</button></>
-                    : <button type="button" className={btnPrimary} onClick={() => saveSource("imap")}>Use IMAP</button>}
-                </div>
-              </section>
-            </TabsContent>
-          </Tabs>
-
-          {hasProvider && (
-            <section className="card-elev space-y-3 rounded-2xl border border-destructive/40 bg-card p-6">
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="size-5 text-destructive" />
-                <h2 className="font-display font-medium">Switch provider</h2>
-              </div>
-              <p className="text-sm text-muted-foreground">Clearing the source blanks both Microsoft 365 and IMAP credentials and stops polling until a new source is configured.</p>
-              <button type="button" className="inline-flex items-center gap-2 rounded-lg border border-destructive/50 px-3.5 py-2 text-sm font-medium text-destructive hover:bg-destructive/10" onClick={clearSource}>
-                <Trash2 className="size-4" /> Clear source configuration
-              </button>
-            </section>
-          )}
-
-          {testMsg && <p className="text-sm text-muted-foreground">{testMsg}</p>}
-          {msg && <p className="text-sm">{msg}</p>}
-        </div>
+        <SourceManager />
       </TabsContent>
 
       {/* POLLING */}
@@ -425,6 +280,361 @@ function SaveBar({ onSave, msg }: { onSave: () => void; msg: string }) {
     <div className="flex items-center gap-3 pt-1">
       <button type="button" className="rounded-lg bg-primary px-3.5 py-2 text-sm font-medium text-primary-foreground" onClick={onSave}>Save</button>
       {msg && <p className="text-sm">{msg}</p>}
+    </div>
+  );
+}
+
+/* ---------- Multi-domain mailbox monitoring ---------- */
+
+type Provider = "graph" | "imap";
+
+interface Source {
+  id: number;
+  domain: string;
+  provider: Provider;
+  isActive: boolean;
+  graphTenantId: string | null;
+  graphClientId: string | null;
+  mailboxUpn: string | null;
+  imapHost: string | null;
+  imapPort: number | null;
+  imapUsername: string | null;
+  imapTls: boolean | null;
+  imapFolder: string | null;
+  hasGraphSecret: boolean;
+  hasImapPassword: boolean;
+  lastPollAt: string | null;
+  lastPollStatus: "ok" | "error" | null;
+  lastPollDetail: string | null;
+}
+
+// Editable fields for a provider's credential form (shared by Edit + Add).
+interface ProviderFields {
+  tenantId: string;
+  clientId: string;
+  clientSecret: string;
+  mailboxUpn: string;
+  imapHost: string;
+  imapPort: string;
+  imapUsername: string;
+  imapPassword: string;
+  imapTls: boolean;
+  imapFolder: string;
+}
+
+const EMPTY_FIELDS: ProviderFields = {
+  tenantId: "", clientId: "", clientSecret: "", mailboxUpn: "",
+  imapHost: "", imapPort: "993", imapUsername: "", imapPassword: "", imapTls: true, imapFolder: "INBOX",
+};
+
+// Build the POST/PATCH body for a source from the shared field set.
+// secretMode "omit-blank" leaves out unchanged secrets so the backend keeps the stored value.
+function buildSourceBody(domain: string, provider: Provider, ff: ProviderFields) {
+  const body: Record<string, unknown> = { domain: domain.trim(), provider };
+  if (provider === "graph") {
+    const graph: Record<string, unknown> = {
+      tenantId: ff.tenantId.trim(), clientId: ff.clientId.trim(), mailboxUpn: ff.mailboxUpn.trim(),
+    };
+    if (ff.clientSecret.trim()) graph.clientSecret = ff.clientSecret;
+    body.graph = graph;
+  } else {
+    const imap: Record<string, unknown> = {
+      host: ff.imapHost.trim(), port: Number(ff.imapPort), username: ff.imapUsername.trim(),
+      tls: ff.imapTls, folder: ff.imapFolder.trim() || "INBOX",
+    };
+    if (ff.imapPassword.trim()) imap.password = ff.imapPassword;
+    body.imap = imap;
+  }
+  return body;
+}
+
+function relativeTime(iso: string | null): string {
+  if (!iso) return "";
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "";
+  const secs = Math.round((Date.now() - then) / 1000);
+  if (secs < 60) return "just now";
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.round(hrs / 24);
+  return `${days}d ago`;
+}
+
+function SourceManager() {
+  const [sources, setSources] = useState<Source[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [err, setErr] = useState("");
+
+  async function reload() {
+    try {
+      const r = await fetch("/api/sources");
+      const d = await r.json();
+      setSources(Array.isArray(d) ? d : []);
+      setLoaded(true);
+    } catch {
+      setErr("Failed to load monitored domains.");
+      setLoaded(true);
+    }
+  }
+
+  useEffect(() => { reload(); }, []);
+
+  if (!loaded) return <p className="text-sm text-muted-foreground">Loading...</p>;
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-muted-foreground">
+        The mailboxes the dashboard monitors for DMARC aggregate reports. Add one source per domain: Microsoft 365 (Graph) for Office 365 tenants, or IMAP for Gmail/Workspace and others.
+      </p>
+
+      {err && <p className="text-sm text-destructive">{err}</p>}
+
+      {sources.length === 0 && (
+        <p className="text-sm text-muted-foreground">No monitored domains yet. Add one below.</p>
+      )}
+
+      {sources.map((s) => (
+        <SourceCard key={s.id} source={s} onChanged={reload} />
+      ))}
+
+      <AddSourceCard onAdded={reload} />
+    </div>
+  );
+}
+
+function providerLabel(p: Provider) { return p === "graph" ? "Microsoft 365" : "IMAP"; }
+
+function SourceCard({ source, onChanged }: { source: Source; onChanged: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [testMsg, setTestMsg] = useState("");
+  const [testOk, setTestOk] = useState<boolean | null>(null);
+  const [saveMsg, setSaveMsg] = useState("");
+
+  // Prefill the edit form from the source; secrets stay blank (placeholder explains).
+  const [ff, setFf] = useState<ProviderFields>(() => ({
+    ...EMPTY_FIELDS,
+    tenantId: source.graphTenantId ?? "",
+    clientId: source.graphClientId ?? "",
+    mailboxUpn: source.mailboxUpn ?? "",
+    imapHost: source.imapHost ?? "",
+    imapPort: String(source.imapPort ?? 993),
+    imapUsername: source.imapUsername ?? "",
+    imapTls: source.imapTls ?? true,
+    imapFolder: source.imapFolder ?? "INBOX",
+  }));
+  const [domain, setDomain] = useState(source.domain);
+
+  async function test() {
+    setTestMsg("Testing connection..."); setTestOk(null);
+    try {
+      const r = await fetch("/api/sources/test", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: source.id }),
+      }).then((x) => x.json());
+      setTestOk(!!r.ok);
+      setTestMsg(r.ok ? "Connected: the mailbox is reachable." : `Connection failed: ${r.error}`);
+    } catch { setTestOk(false); setTestMsg("Connection test failed to reach the server."); }
+  }
+
+  async function remove() {
+    if (!confirm(`Remove monitoring for ${source.domain}? This stops polling and deletes its mailbox credentials.`)) return;
+    const r = await fetch(`/api/sources/${source.id}`, { method: "DELETE" });
+    if (r.ok) onChanged(); else setSaveMsg("Failed to remove this domain.");
+  }
+
+  async function save() {
+    if (!DOMAIN_RE.test(domain.trim())) { setSaveMsg("Enter a valid domain like example.com."); return; }
+    setSaveMsg("Saving...");
+    const r = await fetch(`/api/sources/${source.id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildSourceBody(domain, source.provider, ff)),
+    });
+    if (r.ok) { setEditing(false); onChanged(); }
+    else { const d = await r.json().catch(() => ({})); setSaveMsg(d.error ? `Save failed: ${d.error}` : "Save failed."); }
+  }
+
+  const status = source.lastPollStatus;
+  return (
+    <section className={card}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <h2 className="font-display font-medium text-lg">{source.domain}</h2>
+            <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium text-muted-foreground">
+              {source.provider === "graph" ? <Mail className="size-3.5" /> : <Server className="size-3.5" />}
+              {providerLabel(source.provider)}
+            </span>
+          </div>
+          <div className="text-sm">
+            {status === "ok" && (
+              <span className="inline-flex items-center gap-1.5 text-green-600 dark:text-green-400">
+                <CheckCircle className="size-4" />
+                <span className="font-medium">OK</span>
+                <span className="text-muted-foreground">{source.lastPollDetail}{source.lastPollAt ? ` (${relativeTime(source.lastPollAt)})` : ""}</span>
+              </span>
+            )}
+            {status === "error" && (
+              <span className="inline-flex items-center gap-1.5 text-destructive">
+                <AlertTriangle className="size-4" />
+                <span className="font-medium">Error</span>
+                <span className="text-muted-foreground">{source.lastPollDetail}</span>
+              </span>
+            )}
+            {!status && <span className="text-muted-foreground">Not polled yet</span>}
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" className={`inline-flex items-center gap-1.5 ${btnGhost}`} onClick={() => setEditing((v) => !v)}>
+            <Pencil className="size-4" /> {editing ? "Close" : "Edit"}
+          </button>
+          <button type="button" className={btnGhost} onClick={test}>Test connection</button>
+          <button type="button" className="inline-flex items-center gap-1.5 rounded-lg border border-destructive/50 px-3.5 py-2 text-sm font-medium text-destructive hover:bg-destructive/10" onClick={remove}>
+            <Trash2 className="size-4" /> Remove
+          </button>
+        </div>
+      </div>
+
+      {testMsg && <p className={`text-sm ${testOk === false ? "text-destructive" : testOk ? "text-green-600 dark:text-green-400" : "text-muted-foreground"}`}>{testMsg}</p>}
+
+      {editing && (
+        <div className="space-y-3 border-t pt-4">
+          <div><label className={labelCls}>Domain</label>
+            <input className={input} placeholder="example.com" value={domain} onChange={(e) => setDomain(e.target.value)} /></div>
+          <ProviderFieldset provider={source.provider} ff={ff} setFf={setFf} editing />
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" className={btnPrimary} onClick={save}>Save changes</button>
+            {saveMsg && <p className="text-sm">{saveMsg}</p>}
+          </div>
+        </div>
+      )}
+      {!editing && saveMsg && <p className="text-sm">{saveMsg}</p>}
+    </section>
+  );
+}
+
+function AddSourceCard({ onAdded }: { onAdded: () => void }) {
+  const [domain, setDomain] = useState("");
+  const [provider, setProvider] = useState<Provider>("graph");
+  const [ff, setFf] = useState<ProviderFields>(EMPTY_FIELDS);
+  const [msg, setMsg] = useState("");
+  const [testMsg, setTestMsg] = useState("");
+  const [testOk, setTestOk] = useState<boolean | null>(null);
+
+  function reset() {
+    setDomain(""); setProvider("graph"); setFf(EMPTY_FIELDS); setMsg(""); setTestMsg(""); setTestOk(null);
+  }
+
+  async function test() {
+    setTestMsg("Testing connection..."); setTestOk(null);
+    const body = buildSourceBody(domain || "test.local", provider, ff);
+    delete body.domain;
+    try {
+      const r = await fetch("/api/sources/test", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }).then((x) => x.json());
+      setTestOk(!!r.ok);
+      setTestMsg(r.ok ? "Connected: the mailbox is reachable." : `Connection failed: ${r.error}`);
+    } catch { setTestOk(false); setTestMsg("Connection test failed to reach the server."); }
+  }
+
+  async function add() {
+    if (!DOMAIN_RE.test(domain.trim())) { setMsg("Enter a valid domain like example.com."); return; }
+    setMsg("Adding...");
+    const r = await fetch("/api/sources", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildSourceBody(domain, provider, ff)),
+    });
+    if (r.ok) { reset(); onAdded(); }
+    else { const d = await r.json().catch(() => ({})); setMsg(d.error ? `Could not add: ${d.error}` : "Could not add this domain."); }
+  }
+
+  return (
+    <section className={`${card} border-dashed`}>
+      <div className="flex items-center gap-2">
+        <Plus className="size-5 text-primary" />
+        <h2 className="font-display font-medium">Add domain</h2>
+      </div>
+
+      <div><label className={labelCls}>Domain</label>
+        <input className={input} placeholder="example.com" value={domain} onChange={(e) => setDomain(e.target.value)} /></div>
+
+      <div>
+        <label className={labelCls}>Provider</label>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <button type="button" onClick={() => { setProvider("graph"); setTestMsg(""); setTestOk(null); }}
+            className={`relative flex flex-col gap-1 rounded-2xl border p-4 text-left transition ${provider === "graph" ? "border-primary bg-primary/5" : "border-border bg-card hover:border-primary/40"}`}>
+            {provider === "graph" && <CheckCircle className="absolute right-3 top-3 size-4 text-primary" />}
+            <Mail className="size-5 text-primary" />
+            <span className="font-medium">Microsoft 365 (Graph)</span>
+            <span className="text-xs text-muted-foreground">Azure app registration with Mail.ReadWrite.</span>
+          </button>
+          <button type="button" onClick={() => { setProvider("imap"); setTestMsg(""); setTestOk(null); }}
+            className={`relative flex flex-col gap-1 rounded-2xl border p-4 text-left transition ${provider === "imap" ? "border-primary bg-primary/5" : "border-border bg-card hover:border-primary/40"}`}>
+            {provider === "imap" && <CheckCircle className="absolute right-3 top-3 size-4 text-primary" />}
+            <Server className="size-5 text-primary" />
+            <span className="font-medium">IMAP (Gmail, Workspace, other)</span>
+            <span className="text-xs text-muted-foreground">Standard IMAP with an app password.</span>
+          </button>
+        </div>
+      </div>
+
+      <ProviderFieldset provider={provider} ff={ff} setFf={setFf} />
+
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" className={btnPrimary} onClick={add}>Add</button>
+        <button type="button" className={btnGhost} onClick={test}>Test connection</button>
+      </div>
+      {testMsg && <p className={`text-sm ${testOk === false ? "text-destructive" : testOk ? "text-green-600 dark:text-green-400" : "text-muted-foreground"}`}>{testMsg}</p>}
+      {msg && <p className="text-sm">{msg}</p>}
+    </section>
+  );
+}
+
+// Shared credential fields for a provider, used in both Add and Edit.
+// When `editing`, secret inputs render blank with a "leave blank to keep current" hint.
+function ProviderFieldset({ provider, ff, setFf, editing }: {
+  provider: Provider;
+  ff: ProviderFields;
+  setFf: Dispatch<SetStateAction<ProviderFields>>;
+  editing?: boolean;
+}) {
+  const upd = <K extends keyof ProviderFields>(k: K, v: ProviderFields[K]) => setFf((s) => ({ ...s, [k]: v }));
+  if (provider === "graph") {
+    return (
+      <div className="space-y-3">
+        <p className="text-xs text-muted-foreground">App-only access to a 365 mailbox. See docs/SETUP-ENTRA.md for the one-time Entra app registration.</p>
+        <div><label className={labelCls}>Tenant ID</label>
+          <input className={input} value={ff.tenantId} onChange={(e) => upd("tenantId", e.target.value)} /></div>
+        <div><label className={labelCls}>Client ID</label>
+          <input className={input} value={ff.clientId} onChange={(e) => upd("clientId", e.target.value)} /></div>
+        <div><label className={labelCls}>Client secret</label>
+          <input className={input} type="password" placeholder={editing ? "leave blank to keep current" : ""} value={ff.clientSecret} onChange={(e) => upd("clientSecret", e.target.value)} /></div>
+        <div><label className={labelCls}>Mailbox (UPN)</label>
+          <input className={input} placeholder="dmarc@yourdomain.com" value={ff.mailboxUpn} onChange={(e) => upd("mailboxUpn", e.target.value)} /></div>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-muted-foreground">Gmail/Workspace need an app password (with 2FA). Host examples: imap.gmail.com:993, imap.fastmail.com:993.</p>
+      <div><label className={labelCls}>Host</label>
+        <input className={input} placeholder="imap.gmail.com" value={ff.imapHost} onChange={(e) => upd("imapHost", e.target.value)} /></div>
+      <div><label className={labelCls}>Port</label>
+        <input className={input} type="number" min={1} max={65535} value={ff.imapPort} onChange={(e) => upd("imapPort", e.target.value)} /></div>
+      <div><label className={labelCls}>Username</label>
+        <input className={input} placeholder="dmarc@yourdomain.com" value={ff.imapUsername} onChange={(e) => upd("imapUsername", e.target.value)} /></div>
+      <div><label className={labelCls}>Password (app password)</label>
+        <input className={input} type="password" placeholder={editing ? "leave blank to keep current" : ""} value={ff.imapPassword} onChange={(e) => upd("imapPassword", e.target.value)} /></div>
+      <div><label className={labelCls}>Encryption</label>
+        <select className={input} value={ff.imapTls ? "tls" : "plain"} onChange={(e) => upd("imapTls", e.target.value === "tls")}>
+          <option value="tls">TLS / SSL (recommended)</option>
+          <option value="plain">None</option>
+        </select></div>
+      <div><label className={labelCls}>Folder</label>
+        <input className={input} value={ff.imapFolder} onChange={(e) => upd("imapFolder", e.target.value)} /></div>
     </div>
   );
 }
