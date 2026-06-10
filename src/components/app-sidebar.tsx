@@ -28,7 +28,7 @@ export function AppSidebar({ role, username, appName, logoExt }: { role: Role; u
 
   return (
     <aside className="sticky top-0 hidden h-screen w-[256px] shrink-0 flex-col bg-sidebar text-sidebar-foreground md:flex">
-      <div className="grid-texture pointer-events-none absolute inset-0 text-white opacity-[0.4]" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-white/[0.04] to-transparent" />
       <div className="relative flex h-16 items-center gap-2.5 border-b border-sidebar-border px-5">
         {logoExt ? (
           // eslint-disable-next-line @next/next/no-img-element

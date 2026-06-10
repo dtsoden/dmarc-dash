@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Mail, Server, Check, Clock, Send, Globe, Palette, Trash2, Upload, AlertTriangle } from "lucide-react";
+import { Mail, Server, Inbox, Clock, Send, Globe, Palette, Trash2, Upload, AlertTriangle } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 const MASK = "********";
@@ -177,86 +177,94 @@ export function SettingsForm() {
   return (
     <Tabs defaultValue="source" className="w-full">
       <TabsList className="flex flex-wrap">
-        <TabsTrigger value="source"><Mail /> Mailbox Source</TabsTrigger>
+        <TabsTrigger value="source"><Inbox /> Mailbox Monitoring</TabsTrigger>
         <TabsTrigger value="polling"><Clock /> Polling</TabsTrigger>
-        <TabsTrigger value="email"><Send /> Email</TabsTrigger>
+        <TabsTrigger value="email"><Send /> Notifications</TabsTrigger>
         <TabsTrigger value="geoip"><Globe /> GeoIP</TabsTrigger>
         <TabsTrigger value="branding"><Palette /> Branding</TabsTrigger>
       </TabsList>
 
-      {/* MAILBOX SOURCE */}
+      {/* MAILBOX MONITORING */}
       <TabsContent value="source" className="pt-4">
         <div className="space-y-4">
-          {hasProvider && (
-            <p className="text-sm text-muted-foreground">
-              Active source: <span className="font-mono font-medium text-foreground">{provider === "graph" ? "Microsoft 365 (Graph)" : "IMAP"}</span>. Clear it to switch providers.
-            </p>
-          )}
-          {!hasProvider && (
-            <p className="text-sm text-muted-foreground">No mailbox source configured. Pick one below and save.</p>
-          )}
+          <p className="text-sm text-muted-foreground">
+            The mailbox the dashboard monitors for DMARC aggregate reports. Choose one source:
+            {hasProvider
+              ? <> currently <span className="font-medium text-foreground">{provider === "graph" ? "Microsoft 365" : "IMAP"}</span>. The other is locked until you clear it below.</>
+              : <> Microsoft 365 (Graph) for Office 365 tenants, or IMAP for Gmail/Workspace and others.</>}
+          </p>
 
-          {/* Graph section */}
-          <section className={`${card} ${hasProvider && provider !== "graph" ? "pointer-events-none opacity-50" : ""}`}>
-            <div className="flex items-center gap-2">
-              <Mail className="size-5 text-primary" />
-              <h2 className="font-display font-medium">Microsoft 365 (Graph)</h2>
-              {provider === "graph" && <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">Active</span>}
-            </div>
-            {hasProvider && provider !== "graph" && <p className="text-xs text-muted-foreground">Clear the current source to switch providers.</p>}
-            <div><label className={labelCls}>Tenant ID</label>
-              <input className={input} disabled={hasProvider && provider !== "graph"} value={f.graph_tenant_id} onChange={(e) => set("graph_tenant_id", e.target.value)} /></div>
-            <div><label className={labelCls}>Client ID</label>
-              <input className={input} disabled={hasProvider && provider !== "graph"} value={f.graph_client_id} onChange={(e) => set("graph_client_id", e.target.value)} /></div>
-            <div><label className={labelCls}>Client secret</label>
-              <input className={input} type="password" disabled={hasProvider && provider !== "graph"} value={f.graph_client_secret} onChange={(e) => set("graph_client_secret", e.target.value)} /></div>
-            <div><label className={labelCls}>Mailbox (UPN)</label>
-              <input className={input} disabled={hasProvider && provider !== "graph"} value={f.mailbox_upn} onChange={(e) => set("mailbox_upn", e.target.value)} /></div>
-            <div className="flex flex-wrap items-center gap-2">
-              {provider === "graph" && <button type="button" className={btnPrimary} onClick={() => saveSource()}>Save</button>}
-              {provider === "graph" && <button type="button" className={btnGhost} onClick={testConnection}>Test connection</button>}
-              {!hasProvider && <button type="button" className={btnPrimary} onClick={() => saveSource("graph")}>Use Microsoft 365</button>}
-            </div>
-          </section>
+          <Tabs defaultValue={provider === "imap" ? "imap" : "graph"} className="w-full">
+            <TabsList>
+              <TabsTrigger value="graph" disabled={hasProvider && provider !== "graph"}>
+                <Mail /> Microsoft 365
+                {provider === "graph" && <span className="ml-1.5 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">ACTIVE</span>}
+              </TabsTrigger>
+              <TabsTrigger value="imap" disabled={hasProvider && provider !== "imap"}>
+                <Server /> IMAP
+                {provider === "imap" && <span className="ml-1.5 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">ACTIVE</span>}
+              </TabsTrigger>
+            </TabsList>
 
-          {/* IMAP section */}
-          <section className={`${card} ${hasProvider && provider !== "imap" ? "pointer-events-none opacity-50" : ""}`}>
-            <div className="flex items-center gap-2">
-              <Server className="size-5 text-primary" />
-              <h2 className="font-display font-medium">IMAP (Gmail, Workspace, other)</h2>
-              {provider === "imap" && <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">Active</span>}
-            </div>
-            {hasProvider && provider !== "imap" && <p className="text-xs text-muted-foreground">Clear the current source to switch providers.</p>}
-            <p className="text-xs text-muted-foreground">Gmail/Workspace need an app password (with 2FA). Host examples: imap.gmail.com:993, imap.fastmail.com:993.</p>
-            <div><label className={labelCls}>Host</label>
-              <input className={input} disabled={hasProvider && provider !== "imap"} value={f.imap_host} onChange={(e) => set("imap_host", e.target.value)} /></div>
-            <div><label className={labelCls}>Port</label>
-              <input className={input} type="number" min={1} max={65535} disabled={hasProvider && provider !== "imap"} value={f.imap_port} onChange={(e) => set("imap_port", Number(e.target.value))} /></div>
-            <div><label className={labelCls}>Username</label>
-              <input className={input} disabled={hasProvider && provider !== "imap"} value={f.imap_username} onChange={(e) => set("imap_username", e.target.value)} /></div>
-            <div><label className={labelCls}>Password (app password)</label>
-              <input className={input} type="password" disabled={hasProvider && provider !== "imap"} value={f.imap_password} onChange={(e) => set("imap_password", e.target.value)} /></div>
-            <div><label className={labelCls}>Encryption</label>
-              <select className={input} disabled={hasProvider && provider !== "imap"} value={f.imap_tls ? "tls" : "plain"} onChange={(e) => set("imap_tls", e.target.value === "tls")}>
-                <option value="tls">TLS / SSL (recommended)</option>
-                <option value="plain">None</option>
-              </select></div>
-            <div><label className={labelCls}>Folder</label>
-              <input className={input} disabled={hasProvider && provider !== "imap"} value={f.imap_folder} onChange={(e) => set("imap_folder", e.target.value)} /></div>
-            <div className="flex flex-wrap items-center gap-2">
-              {provider === "imap" && <button type="button" className={btnPrimary} onClick={() => saveSource()}>Save</button>}
-              {provider === "imap" && <button type="button" className={btnGhost} onClick={testConnection}>Test connection</button>}
-              {!hasProvider && <button type="button" className={btnPrimary} onClick={() => saveSource("imap")}>Use IMAP</button>}
-            </div>
-          </section>
+            {/* Microsoft 365 sub-tab */}
+            <TabsContent value="graph" className="pt-4">
+              <section className={card}>
+                <h2 className="font-display font-medium">Microsoft 365 (Microsoft Graph)</h2>
+                <p className="text-xs text-muted-foreground">App-only access to a 365 mailbox. See docs/SETUP-ENTRA.md for the one-time Entra app registration.</p>
+                <div><label className={labelCls}>Tenant ID</label>
+                  <input className={input} value={f.graph_tenant_id} onChange={(e) => set("graph_tenant_id", e.target.value)} /></div>
+                <div><label className={labelCls}>Client ID</label>
+                  <input className={input} value={f.graph_client_id} onChange={(e) => set("graph_client_id", e.target.value)} /></div>
+                <div><label className={labelCls}>Client secret</label>
+                  <input className={input} type="password" value={f.graph_client_secret} onChange={(e) => set("graph_client_secret", e.target.value)} /></div>
+                <div><label className={labelCls}>Mailbox (UPN)</label>
+                  <input className={input} value={f.mailbox_upn} onChange={(e) => set("mailbox_upn", e.target.value)} /></div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {provider === "graph"
+                    ? <><button type="button" className={btnPrimary} onClick={() => saveSource()}>Save</button>
+                        <button type="button" className={btnGhost} onClick={testConnection}>Test connection</button></>
+                    : <button type="button" className={btnPrimary} onClick={() => saveSource("graph")}>Use Microsoft 365</button>}
+                </div>
+              </section>
+            </TabsContent>
+
+            {/* IMAP sub-tab */}
+            <TabsContent value="imap" className="pt-4">
+              <section className={card}>
+                <h2 className="font-display font-medium">IMAP (Gmail, Workspace, Fastmail, other)</h2>
+                <p className="text-xs text-muted-foreground">Gmail/Workspace need an app password (with 2FA). Host examples: imap.gmail.com:993, imap.fastmail.com:993.</p>
+                <div><label className={labelCls}>Host</label>
+                  <input className={input} value={f.imap_host} onChange={(e) => set("imap_host", e.target.value)} /></div>
+                <div><label className={labelCls}>Port</label>
+                  <input className={input} type="number" min={1} max={65535} value={f.imap_port} onChange={(e) => set("imap_port", Number(e.target.value))} /></div>
+                <div><label className={labelCls}>Username</label>
+                  <input className={input} value={f.imap_username} onChange={(e) => set("imap_username", e.target.value)} /></div>
+                <div><label className={labelCls}>Password (app password)</label>
+                  <input className={input} type="password" value={f.imap_password} onChange={(e) => set("imap_password", e.target.value)} /></div>
+                <div><label className={labelCls}>Encryption</label>
+                  <select className={input} value={f.imap_tls ? "tls" : "plain"} onChange={(e) => set("imap_tls", e.target.value === "tls")}>
+                    <option value="tls">TLS / SSL (recommended)</option>
+                    <option value="plain">None</option>
+                  </select></div>
+                <div><label className={labelCls}>Folder</label>
+                  <input className={input} value={f.imap_folder} onChange={(e) => set("imap_folder", e.target.value)} /></div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {provider === "imap"
+                    ? <><button type="button" className={btnPrimary} onClick={() => saveSource()}>Save</button>
+                        <button type="button" className={btnGhost} onClick={testConnection}>Test connection</button></>
+                    : <button type="button" className={btnPrimary} onClick={() => saveSource("imap")}>Use IMAP</button>}
+                </div>
+              </section>
+            </TabsContent>
+          </Tabs>
 
           {hasProvider && (
             <section className="card-elev space-y-3 rounded-2xl border border-destructive/40 bg-card p-6">
               <div className="flex items-center gap-2">
                 <AlertTriangle className="size-5 text-destructive" />
-                <h2 className="font-display font-medium">Danger zone</h2>
+                <h2 className="font-display font-medium">Switch provider</h2>
               </div>
-              <p className="text-sm text-muted-foreground">Clearing the source blanks both Graph and IMAP credentials and stops polling until a new source is configured.</p>
+              <p className="text-sm text-muted-foreground">Clearing the source blanks both Microsoft 365 and IMAP credentials and stops polling until a new source is configured.</p>
               <button type="button" className="inline-flex items-center gap-2 rounded-lg border border-destructive/50 px-3.5 py-2 text-sm font-medium text-destructive hover:bg-destructive/10" onClick={clearSource}>
                 <Trash2 className="size-4" /> Clear source configuration
               </button>
@@ -284,10 +292,11 @@ export function SettingsForm() {
         </section>
       </TabsContent>
 
-      {/* EMAIL */}
+      {/* NOTIFICATIONS (outbound email / SMTP) */}
       <TabsContent value="email" className="pt-4">
         <section className={card}>
-          <h2 className="font-display font-medium">Email digests</h2>
+          <h2 className="font-display font-medium">Notifications</h2>
+          <p className="text-xs text-muted-foreground">Outbound email used to <span className="font-medium text-foreground">send</span> the weekly/monthly digest reports and password-reset messages (delivered via MailerSend). This is separate from the mailbox the dashboard monitors.</p>
           <div><label className={labelCls}>MailerSend API token</label>
             <input className={input} type="password" value={f.mailersend_token} onChange={(e) => set("mailersend_token", e.target.value)} /></div>
           <div><label className={labelCls}>From address</label>
@@ -304,10 +313,11 @@ export function SettingsForm() {
         </section>
       </TabsContent>
 
-      {/* GEOIP */}
+      {/* GEOIP (optional) */}
       <TabsContent value="geoip" className="pt-4">
         <section className={card}>
-          <h2 className="font-display font-medium">GeoIP</h2>
+          <h2 className="font-display font-medium">GeoIP <span className="text-sm font-normal text-muted-foreground">(optional)</span></h2>
+          <p className="text-xs text-muted-foreground">Powers the world map of sending IPs on the Sources page. Optional. Uses a free MaxMind GeoLite2 license key; without it everything else still works.</p>
           <div><label className={labelCls}>MaxMind GeoLite2 license key</label>
             <input className={input} type="password" value={f.maxmind_license_key} onChange={(e) => set("maxmind_license_key", e.target.value)} /></div>
           <SaveBar onSave={() => save()} msg={msg} />
