@@ -120,6 +120,52 @@ is the source material for the polished README / setup / operations docs. Keep i
   `CLOUDFLARE_API_TOKEN` was set, so the DNS change was left to the dashboard / a scoped
   token.
 
+## 8b. Multi-domain mailbox monitoring
+
+- Each monitored domain is a row in the `mailbox_source` table: `domain` (unique,
+  validated), `provider` (graph|imap), that provider's credentials (secrets AES-encrypted
+  with the app key, same as settings), plus `last_poll_at/status/detail` for per-mailbox
+  health. CRUD via `/api/sources` (admin); test via `/api/sources/test` ({id} = stored
+  creds, or full creds for an unsaved one, works in the wizard too).
+- **One global poll interval.** Each tick the scheduler polls ALL active sources
+  **concurrently** (`Promise.allSettled`); one broken/slow mailbox never blocks the
+  others, and its error is recorded on the source row + shown in Settings.
+- **Legacy migration:** older single-mailbox installs (flat `mailbox_provider`/`graph_*`/
+  `imap_*` settings) are migrated into the first `mailbox_source` row at scheduler boot.
+  If `mailbox_provider` was never set, the provider is inferred from whichever credentials
+  exist. Idempotent.
+- Dashboards stay **aggregate across all domains** with the existing domain filter; the
+  per-report domain still comes from the XML, so one mailbox can serve several domains.
+- Wizard configures the FIRST domain; add more under Settings -> Mailbox Monitoring.
+
+## 8c. White-label branding
+
+- Per-mode brand color: `brand_color_light` / `brand_color_dark` drive buttons, active
+  tabs, links, focus ring, and the logo mark; button/logo text auto-contrasts by
+  luminance. `brand_default_theme` (light|dark) is the admin default theme (a user's own
+  toggle overrides per browser). `brand_app_name`, plus uploaded `logo`/`favicon` served
+  from `/api/brand/{kind}` (files in `<DATA_DIR>/brand/`). Injected as CSS variables in the
+  root layout at runtime. Configurable in Settings -> Branding AND the wizard branding step.
+
+## 8d. User invites (no emailed passwords)
+
+- Adding a user is **disabled unless outbound email (MailerSend) is configured** (the UI
+  auto-detects and greys out the form; the API refuses with a clear message).
+- New users receive a **single-use, 7-day token link** (reusing the password-reset token
+  table) to set their own password. No password is ever emailed.
+
+## 8e. Tables (Ingest Log, Reports)
+
+- Server-driven pagination (25/50/100), sortable columns (allowlisted, injection-safe),
+  and search/filter via URL params (`q`, `status`/`domain`, `sort`, `dir`, `page`,
+  `pageSize`). Report drill-in is intentionally un-paginated (few records).
+
+## 8f. DNS authentication report (read-only)
+
+- Reports -> DNS Report queries SPF, DMARC, DKIM, MX, BIMI, MTA-STS, TLS-RPT for a domain
+  via public DNS (1.1.1.1/8.8.8.8). DKIM selectors are auto-discovered from
+  `auth_result_dkim` (observed in ingested reports). Query-only; never changes DNS.
+
 ## 9. Roles / security (for the admin guide)
 
 - Roles: Administrator (everything), Analyst (dashboards + manual poll + export), Viewer
