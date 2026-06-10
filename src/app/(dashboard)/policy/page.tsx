@@ -14,8 +14,9 @@ export default async function PolicyPage({ searchParams }: { searchParams: Promi
   return (
     <div>
       <FilterBar domains={domains} />
-      <div className="rounded-xl border bg-background p-4">
-        <h2 className="mb-4 text-sm font-medium">Disposition breakdown</h2>
+      <div className="card-elev rounded-2xl border border-border bg-card p-5">
+        <h2 className="font-display text-sm font-semibold">Disposition breakdown</h2>
+        <p className="mb-4 text-xs text-muted-foreground">Policy actions applied to messages across the selected range.</p>
         <BreakdownBar rows={d.map((r) => ({ label: r.disposition, value: r.messages }))} />
       </div>
     </div>

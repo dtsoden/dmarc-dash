@@ -9,15 +9,19 @@ export function SourceTable({ rows }: { rows: { sourceIp: string; messages: numb
         <TableHead className="text-right">Pass rate</TableHead>
       </TableRow></TableHeader>
       <TableBody>
-        {rows.map((r) => (
-          <TableRow key={r.sourceIp}>
-            <TableCell className="font-mono text-xs">{r.sourceIp}</TableCell>
-            <TableCell className="text-right">{r.messages.toLocaleString()}</TableCell>
-            <TableCell className="text-right text-green-600">{r.pass.toLocaleString()}</TableCell>
-            <TableCell className="text-right text-red-600">{r.fail.toLocaleString()}</TableCell>
-            <TableCell className="text-right">{r.messages ? Math.round((r.pass / r.messages) * 100) : 0}%</TableCell>
-          </TableRow>
-        ))}
+        {rows.map((r) => {
+          const rate = r.messages ? Math.round((r.pass / r.messages) * 100) : 0;
+          const rateColor = rate >= 90 ? "text-emerald-600 dark:text-emerald-400" : rate >= 50 ? "text-amber-600 dark:text-amber-400" : "text-red-600 dark:text-red-400";
+          return (
+            <TableRow key={r.sourceIp}>
+              <TableCell className="font-mono text-xs">{r.sourceIp}</TableCell>
+              <TableCell className="text-right tabular-nums">{r.messages.toLocaleString()}</TableCell>
+              <TableCell className="text-right tabular-nums font-medium text-emerald-600 dark:text-emerald-400">{r.pass.toLocaleString()}</TableCell>
+              <TableCell className="text-right tabular-nums font-medium text-red-600 dark:text-red-400">{r.fail.toLocaleString()}</TableCell>
+              <TableCell className={`text-right tabular-nums font-semibold ${rateColor}`}>{rate}%</TableCell>
+            </TableRow>
+          );
+        })}
       </TableBody>
     </Table>
   );

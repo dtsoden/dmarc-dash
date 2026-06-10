@@ -25,13 +25,15 @@ export default async function SourcesPage({ searchParams }: { searchParams: Prom
     <div>
       <FilterBar domains={domains} />
       {points.length > 0 && (
-        <div className="mb-6 rounded-xl border bg-background p-4">
-          <h2 className="mb-2 text-sm font-medium">Source geography (red = mostly failing)</h2>
+        <div className="card-elev mb-6 rounded-2xl border border-border bg-card p-5">
+          <h2 className="font-display text-sm font-semibold">Source geography</h2>
+          <p className="mb-3 text-xs text-muted-foreground">Red markers indicate sources that are mostly failing DMARC.</p>
           <GeoMap points={points} />
         </div>
       )}
-      <div className="rounded-xl border bg-background p-4">
-        <h2 className="mb-4 text-sm font-medium">Top sending sources</h2>
+      <div className="card-elev rounded-2xl border border-border bg-card p-5">
+        <h2 className="font-display text-sm font-semibold">Top sending sources</h2>
+        <p className="mb-4 text-xs text-muted-foreground">Ranked by message volume across the selected range.</p>
         <SourceTable rows={sources} />
       </div>
     </div>
