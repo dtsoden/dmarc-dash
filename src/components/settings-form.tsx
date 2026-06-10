@@ -65,6 +65,7 @@ export function SettingsForm() {
   const [loaded, setLoaded] = useState(false);
   const [msg, setMsg] = useState("");
   const [testMsg, setTestMsg] = useState("");
+  const [brandTab, setBrandTab] = useState<"light" | "dark">("light");
   const logoInput = useRef<HTMLInputElement>(null);
   const faviconInput = useRef<HTMLInputElement>(null);
 
@@ -346,15 +347,16 @@ export function SettingsForm() {
             <div>
               <label className={labelCls}>Brand color</label>
               <p className="mb-2 text-xs text-muted-foreground">Drives buttons, active tabs, links, focus rings, and the logo. Set one per mode; button text auto-contrasts. The sidebar is always dark, so the logo uses the active mode&apos;s color.</p>
-              <Tabs defaultValue="light" className="w-full">
+              <Tabs value={brandTab} onValueChange={(v) => setBrandTab((v as "light" | "dark") ?? "light")} className="w-full">
                 <div className="flex items-center justify-between gap-3">
                   <TabsList>
                     <TabsTrigger value="light">Light mode</TabsTrigger>
                     <TabsTrigger value="dark">Dark mode</TabsTrigger>
                   </TabsList>
-                  <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                    Default to dark mode
-                    <Switch checked={f.brand_default_theme === "dark"} onChange={(v) => set("brand_default_theme", v ? "dark" : "light")} />
+                  <label className="flex items-center gap-2 text-sm text-muted-foreground" title={`Make ${brandTab} mode the default for new visitors`}>
+                    Default to {brandTab} mode
+                    <Switch checked={f.brand_default_theme === brandTab}
+                      onChange={(v) => set("brand_default_theme", v ? brandTab : (brandTab === "light" ? "dark" : "light"))} />
                   </label>
                 </div>
                 <TabsContent value="light" className="pt-3">
