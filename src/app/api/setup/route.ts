@@ -8,6 +8,7 @@ import { createUser } from "@/lib/auth/users";
 import { setSettings, setSetting } from "@/lib/settings";
 import { createSource } from "@/lib/mailbox/store";
 import { applySettingsChange } from "@/lib/scheduler";
+import { downloadGeoLite } from "@/lib/geo/fetch-geolite";
 
 const DOMAIN_RE = /^([a-z0-9](-?[a-z0-9])*\.)+[a-z]{2,}$/i;
 
@@ -54,7 +55,7 @@ export async function POST(req: Request) {
     mailersend_token: b.email.token, mailersend_from: b.email.from,
     digest_recipients: b.email.recipients, digest_weekly_cron: b.email.weeklyCron, digest_monthly_cron: b.email.monthlyCron,
   });
-  if (b.maxmind) setSetting("maxmind_license_key", b.maxmind.key);
+  if (b.maxmind) { setSetting("maxmind_license_key", b.maxmind.key); void downloadGeoLite(b.maxmind.key); }
   if (b.brand) setSettings({
     brand_app_name: b.brand.appName, brand_color_light: b.brand.colorLight,
     brand_color_dark: b.brand.colorDark, brand_default_theme: b.brand.defaultTheme,

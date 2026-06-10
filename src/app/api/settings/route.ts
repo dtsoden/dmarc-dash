@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/guard";
-import { getSettings, setSettings, SETTING_DEFS } from "@/lib/settings";
+import { getSettings, setSettings, getSetting, SETTING_DEFS } from "@/lib/settings";
 import { applySettingsChange } from "@/lib/scheduler";
+import { downloadGeoLite } from "@/lib/geo/fetch-geolite";
 
 const MASK = "********";
 const SECRET_KEYS = Object.entries(SETTING_DEFS).filter(([, d]) => d.type === "secret").map(([k]) => k);
@@ -31,5 +32,11 @@ export async function POST(req: Request) {
   }
   setSettings(update);
   applySettingsChange();   // live re-schedule poll + digests
+
+  // If a new MaxMind key was provided, fetch the GeoLite2 database in the background so
+  // the source map works without a manual script or restart.
+  if (typeof update.maxmind_license_key === "string" && update.maxmind_license_key) {
+    void downloadGeoLite(getSetting<string>("maxmind_license_key"));
+  }
   return NextResponse.json({ ok: true });
 }

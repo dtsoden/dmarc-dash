@@ -5,6 +5,12 @@ import { bootstrap } from "@/lib/config";
 let reader: Reader<CityResponse> | null = null;
 let attempted = false;
 
+// Clear the cached reader so a freshly downloaded database is picked up without a restart.
+export function resetGeoReader(): void {
+  reader = null;
+  attempted = false;
+}
+
 async function getReader(): Promise<Reader<CityResponse> | null> {
   if (attempted) return reader;
   attempted = true;

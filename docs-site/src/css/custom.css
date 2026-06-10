@@ -1,0 +1,44 @@
+/* DMARC Dashboard docs theme, matched to the app palette. */
+@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Sora:wght@600;700&family=JetBrains+Mono&display=swap");
+
+:root {
+  /* Light mode: teal primary (matches the app's light brand color). */
+  --ifm-color-primary: #0093a2;
+  --ifm-color-primary-dark: #008493;
+  --ifm-color-primary-darker: #007d8a;
+  --ifm-color-primary-darkest: #006772;
+  --ifm-color-primary-light: #00a2b1;
+  --ifm-color-primary-lighter: #00aabb;
+  --ifm-color-primary-lightest: #00c2d6;
+
+  --ifm-background-color: #f6f8f9;
+  --ifm-font-family-base: "Plus Jakarta Sans", system-ui, sans-serif;
+  --ifm-heading-font-family: "Sora", "Plus Jakarta Sans", sans-serif;
+  --ifm-font-family-monospace: "JetBrains Mono", monospace;
+  --ifm-code-font-size: 90%;
+  --ifm-navbar-background-color: #1f3038;
+  --ifm-navbar-link-color: #c7d3d8;
+  --ifm-navbar-link-hover-color: #ffffff;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="dark"] {
+  /* Dark mode: green primary + slate surfaces (matches the app's dark brand). */
+  --ifm-color-primary: #00df7e;
+  --ifm-color-primary-dark: #00c870;
+  --ifm-color-primary-darker: #00bd6a;
+  --ifm-color-primary-darkest: #009b57;
+  --ifm-color-primary-light: #1ce58d;
+  --ifm-color-primary-lighter: #2ae794;
+  --ifm-color-primary-lightest: #54ecab;
+
+  --ifm-background-color: #0e191f;
+  --ifm-background-surface-color: #15242c;
+  --ifm-navbar-background-color: #0a141a;
+  --ifm-footer-background-color: #0a141a;
+  --docusaurus-highlighted-code-line-bg: rgba(255, 255, 255, 0.10);
+}
+
+/* The brand mark in the navbar reads on the dark rail in both modes. */
+.navbar__title { font-family: "Sora", sans-serif; letter-spacing: -0.01em; }
+.navbar__brand:hover { color: #fff; }
