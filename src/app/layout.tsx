@@ -9,7 +9,7 @@ const mono = JetBrains_Mono({ variable: "--font-mono", subsets: ["latin"] });
 
 function brandSafe() {
   try { return getBrand(); }
-  catch { return { appName: "DMARC Dashboard", colorLight: "#0093a2", colorDark: "#00df7e", logoExt: "", faviconExt: "" }; }
+  catch { return { appName: "DMARC Dashboard", colorLight: "#0093a2", colorDark: "#00df7e", defaultTheme: "dark", logoExt: "", faviconExt: "" }; }
 }
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -34,7 +34,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="en" className={`${display.variable} ${sans.variable} ${mono.variable} h-full antialiased`} suppressHydrationWarning>
       <head>
         <style dangerouslySetInnerHTML={{ __html: themeVars }} />
-        <script dangerouslySetInnerHTML={{ __html: `(function(){try{var t=localStorage.getItem('theme');if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme: dark)').matches)){document.documentElement.classList.add('dark');}}catch(e){}})();` }} />
+        <script dangerouslySetInnerHTML={{ __html: `(function(){try{var t=localStorage.getItem('theme');var d='${b.defaultTheme}';var dark=t?(t==='dark'):(d==='dark');if(dark){document.documentElement.classList.add('dark');}}catch(e){}})();` }} />
       </head>
       <body className="min-h-full bg-background font-sans text-foreground">{children}</body>
     </html>

@@ -34,6 +34,7 @@ export const SETTING_DEFS: Record<string, Def> = {
   brand_app_name:        { type: "string", default: "DMARC Dashboard" },
   brand_color_light:     { type: "string", default: "#0093a2" },
   brand_color_dark:      { type: "string", default: "#00df7e" },
+  brand_default_theme:   { type: "string", default: "dark" },  // "light" | "dark" (admin default)
   brand_logo_ext:        { type: "string", default: "" },   // e.g. "svg"/"png"; "" => wordmark
   brand_favicon_ext:     { type: "string", default: "" },   // e.g. "svg"/"ico"/"png"
 };

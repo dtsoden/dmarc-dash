@@ -38,6 +38,7 @@ interface SettingsState {
   brand_app_name: string;
   brand_color_light: string;
   brand_color_dark: string;
+  brand_default_theme: string;
   brand_logo_ext: string;
   brand_favicon_ext: string;
 }
@@ -50,7 +51,7 @@ const EMPTY: SettingsState = {
   mailersend_token: "", mailersend_from: "", digest_recipients: "",
   digest_weekly_cron: "", digest_monthly_cron: "", maxmind_license_key: "",
   brand_app_name: "DMARC Dashboard", brand_color_light: "#0093a2", brand_color_dark: "#00df7e",
-  brand_logo_ext: "", brand_favicon_ext: "",
+  brand_default_theme: "dark", brand_logo_ext: "", brand_favicon_ext: "",
 };
 
 const input = "w-full rounded-md border px-3 py-2";
@@ -98,6 +99,7 @@ export function SettingsForm() {
           brand_app_name: d.brand_app_name ?? "DMARC Dashboard",
           brand_color_light: d.brand_color_light ?? "#0093a2",
           brand_color_dark: d.brand_color_dark ?? "#00df7e",
+          brand_default_theme: d.brand_default_theme ?? "dark",
           brand_logo_ext: d.brand_logo_ext ?? "",
           brand_favicon_ext: d.brand_favicon_ext ?? "",
         });
@@ -345,10 +347,16 @@ export function SettingsForm() {
               <label className={labelCls}>Brand color</label>
               <p className="mb-2 text-xs text-muted-foreground">Drives buttons, active tabs, links, focus rings, and the logo. Set one per mode; button text auto-contrasts. The sidebar is always dark, so the logo uses the active mode&apos;s color.</p>
               <Tabs defaultValue="light" className="w-full">
-                <TabsList>
-                  <TabsTrigger value="light">Light mode</TabsTrigger>
-                  <TabsTrigger value="dark">Dark mode</TabsTrigger>
-                </TabsList>
+                <div className="flex items-center justify-between gap-3">
+                  <TabsList>
+                    <TabsTrigger value="light">Light mode</TabsTrigger>
+                    <TabsTrigger value="dark">Dark mode</TabsTrigger>
+                  </TabsList>
+                  <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                    Default to dark mode
+                    <Switch checked={f.brand_default_theme === "dark"} onChange={(v) => set("brand_default_theme", v ? "dark" : "light")} />
+                  </label>
+                </div>
                 <TabsContent value="light" className="pt-3">
                   <div className="flex items-center gap-2">
                     <input type="color" className="h-10 w-12 rounded-md border" value={HEX_RE.test(f.brand_color_light) ? f.brand_color_light : "#0093a2"} onChange={(e) => set("brand_color_light", e.target.value)} />
@@ -398,6 +406,15 @@ export function SettingsForm() {
         </div>
       </TabsContent>
     </Tabs>
+  );
+}
+
+function Switch({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button type="button" role="switch" aria-checked={checked} onClick={() => onChange(!checked)}
+      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${checked ? "bg-primary" : "bg-muted-foreground/30"}`}>
+      <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${checked ? "translate-x-[22px]" : "translate-x-0.5"}`} />
+    </button>
   );
 }
 

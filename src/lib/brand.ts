@@ -6,6 +6,7 @@ export interface Brand {
   appName: string;
   colorLight: string;  // brand color for light mode
   colorDark: string;   // brand color for dark mode
+  defaultTheme: string; // "light" | "dark" admin default
   logoExt: string;     // "" when no custom logo (use wordmark)
   faviconExt: string;  // "" when no custom favicon
 }
@@ -15,6 +16,7 @@ export function getBrand(): Brand {
     appName: getSetting<string>("brand_app_name") || "DMARC Dashboard",
     colorLight: getSetting<string>("brand_color_light") || "#0093a2",
     colorDark: getSetting<string>("brand_color_dark") || "#00df7e",
+    defaultTheme: getSetting<string>("brand_default_theme") === "light" ? "light" : "dark",
     logoExt: getSetting<string>("brand_logo_ext") || "",
     faviconExt: getSetting<string>("brand_favicon_ext") || "",
   };
