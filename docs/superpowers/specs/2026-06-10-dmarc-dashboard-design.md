@@ -19,30 +19,55 @@ administrators. Runs unattended in Docker, polling every 15 minutes by default.
 - **Stack: Next.js 15 (App Router) + TypeScript + shadcn/ui + Tailwind + Recharts**,
   `better-sqlite3` for storage. One Docker container. Ingest worker runs in-process via
   `node-cron`.
-- **Dashboard auth: simple single-admin login** (username + hashed password, session
-  cookie).
-- **GeoIP map included**, using MaxMind GeoLite2 (free license key, optional config).
+- **All configuration lives in the database, set through the UI — not env vars.** A
+  **first-run setup wizard** collects Graph credentials, mailbox, poll interval, email,
+  and MaxMind key, and creates the first administrator. The only environment input is the
+  data directory (where the DB and the app encryption key live). No default credentials
+  ship; the admin is created in the wizard.
+- **Multi-user with roles** (Administrator / Analyst / Viewer), admin-managed user CRUD,
+  **forgot-password** via email, and **no self-registration** (only an admin adds users).
+- **Secrets encrypted at rest.** Passwords are bcrypt-hashed; secret settings (Graph
+  client secret, MailerSend token) are AES-256-GCM encrypted in the DB with a key
+  auto-generated into the data volume on first run.
+- **GeoIP map included**, using MaxMind GeoLite2 (license key set in Settings).
 - **Email digests (weekly + monthly)** via MailerSend, to a configured recipient list.
-  This closes the main gap vs. Postmark DMARC Digests Premium. Recommendations engine,
-  multi-user, and instant alerts are intentionally out of scope.
-- **Deployment: local Docker now** (docker-compose + `.env`), portable to EasyPanel later.
+  This closes the main gap vs. Postmark DMARC Digests Premium.
+- **Poll interval is a UI setting** (minutes), applied live without a restart.
+- **Deployment: local Docker now** (single data volume), portable to EasyPanel later.
 
 ## 3. Architecture
 
 Single Next.js app, one container, two cooperating halves sharing the codebase and DB:
 
-1. **Ingest worker** — `node-cron` schedule (default `*/15 * * * *`). Authenticates
-   app-only to Graph, pulls reports from the Inbox, parses, stores, deletes the email.
-2. **Dashboard** — SSR pages (shadcn/ui + Tailwind + Recharts) behind admin login.
+1. **Ingest worker** — `node-cron` job whose interval comes from the DB settings
+   (default 15 minutes). Authenticates app-only to Graph using credentials read from
+   settings, pulls reports from the Inbox, parses, stores, deletes the email. The job is
+   re-scheduled live whenever the interval setting changes.
+2. **Dashboard + admin** — SSR pages (shadcn/ui + Tailwind + Recharts) behind login with
+   role-based access, plus a setup wizard, a Settings area, and User management.
 
-SQLite DB file and the GeoLite2 DB live on a mounted volume so data survives container
-restarts.
+The SQLite DB, the GeoLite2 DB, and the app encryption key all live on a single mounted
+data volume so data and config survive container restarts.
+
+### Configuration model
+
+- **Settings service** reads typed values from a `setting` table (key/value/type), with
+  an in-memory cache invalidated on write. Secret-typed settings are transparently
+  decrypted on read and encrypted on write.
+- **Bootstrap env (only):** `DATA_DIR` (default `data`) and optional `PORT`. Everything
+  else (Graph creds, mailbox, poll interval, delete mode, MailerSend, MaxMind, schedules)
+  is a setting edited in the wizard/Settings UI.
+- **App encryption key:** 32 random bytes written to `<DATA_DIR>/app.key` on first run
+  (0600). Used for AES-256-GCM of secret settings. Losing it means re-entering secrets.
+- **First-run detection:** if no administrator exists, every route redirects to `/setup`.
 
 ## 4. Ingestion pipeline
 
-1. **Auth**: MSAL client-credentials flow → app-only token. Requires a one-time Entra app
-   registration with `Mail.ReadWrite`, scoped to just the target mailbox via an Exchange
-   Application Access Policy. A step-by-step setup doc will be produced.
+1. **Auth**: MSAL client-credentials flow → app-only token, using tenant/client/secret/
+   mailbox read from settings (entered in the wizard, not env). Requires a one-time Entra
+   app registration with `Mail.ReadWrite`, scoped to just the target mailbox via an
+   Exchange Application Access Policy. A step-by-step setup doc will be produced, and the
+   wizard provides a "Test connection" button.
 2. **Fetch**: Graph lists Inbox messages and their attachments.
 3. **Decompress**: sniff magic bytes (gzip `1f 8b`, zip `50 4b`); handle `.xml.gz`,
    `.zip` (xml inside), and plain `.xml`. Charset-detect before parsing (non-UTF-8 seen
@@ -83,12 +108,61 @@ Derived from RFC 7489 (legacy) + RFC 9990 (DMARCbis) — designed to the union o
   `records_ingested`, `dropped_fields` (JSON of any field/element we had no column for),
   `message_id`, `processed_at`, `error_detail`.
 
+Config / identity tables:
+
+- `setting` — `key` (PK), `value` (TEXT, encrypted if secret), `type`
+  (`string|int|bool|secret|json`), `updated_at`. Single source of truth for all runtime
+  config.
+- `app_user` — `id`, `username` (unique), `email` (unique), `password_hash` (bcrypt),
+  `role` (`admin|analyst|viewer`), `is_active`, `must_change_password`, `created_at`,
+  `last_login_at`.
+- `password_reset` — `id`, `user_id` FK, `token_hash`, `expires_at`, `used_at`. Tokens
+  are random, stored hashed, single-use, short-lived.
+
 Notes:
 - Store enums as TEXT, unconstrained (real reporters emit out-of-spec values).
 - Keep BOTH the DMARC-aligned pass/fail (`policy_evaluated` → `dkim_aligned`,
   `spf_aligned`) and the raw SPF/DKIM auth results — they are different concepts.
 - `count` is the additive measure for nearly every KPI (`SUM(count)` grouped by a
   dimension).
+
+## 5a. Users, roles, and access
+
+Three roles:
+
+- **Administrator** — full access: dashboards, Settings, User management, manual poll,
+  test connection / test digest.
+- **Analyst** — dashboards + manual "poll now" + data export. No Settings, no Users.
+- **Viewer** — read-only dashboards. No actions, no admin areas.
+
+Auth and lifecycle:
+
+- **Login** with username (or email) + password; iron-session cookie carrying `userId`
+  and `role`. Role checked in middleware and in each admin route/server action.
+- **No self-registration.** Admins create users (set role, email, temporary password with
+  `must_change_password`). Users can be deactivated or deleted.
+- **Forgot password**: user submits email → if it matches an active user and email is
+  configured, a single-use reset link (hashed token, short expiry) is emailed via
+  MailerSend → reset page sets a new bcrypt password. If email isn't configured, the page
+  says so and an admin must reset it manually.
+- **Change password** available to any logged-in user; forced when
+  `must_change_password` is set.
+
+## 5b. Setup wizard (first run)
+
+When no administrator exists, all traffic redirects to `/setup`. Steps:
+
+1. **Create administrator** — username, email, password.
+2. **Microsoft Graph** — tenant ID, client ID, client secret, mailbox UPN, with a "Test
+   connection" button (lists the inbox to confirm access).
+3. **Polling** — interval in minutes (default 15), delete mode (safe/hard).
+4. **Email (optional)** — MailerSend token, from-address, digest recipients, weekly/
+   monthly schedules, with a "Send test email" button.
+5. **GeoIP (optional)** — MaxMind license key.
+
+On completion the wizard writes settings (secrets encrypted), creates the admin, marks
+`setup_complete=true`, and starts the scheduler. Everything here is later editable in
+**Settings** (admin only); saving the interval re-schedules the poller live.
 
 ## 6. Dashboard views
 
@@ -115,38 +189,36 @@ TDD focused on the parser/ingest pipeline:
 
 ## 8. Email digests
 
-Scheduled summary emails sent via MailerSend (REST API; token stored at
-`C:/Users/DavidSoden/registry/email_access_token.txt`, copied into `.env`).
+Scheduled summary emails sent via MailerSend (REST API). The token, from-address,
+recipients, and schedules are all **settings** entered in the wizard/Settings UI (the
+token at `C:/Users/DavidSoden/registry/email_access_token.txt` is pasted in during
+setup, not committed).
 
-- **Weekly** and **monthly** digests on their own cron schedules.
+- **Weekly** and **monthly** digests on their own cron schedules (settings).
 - Content: overall DMARC/SPF/DKIM compliance %, total volume, quarantined/rejected
   counts, top sending sources (pass/fail), new sources first seen in the period, and
   trend vs. the previous period. HTML email built from the same query layer the
   dashboard uses.
-- Recipients come from `DIGEST_RECIPIENTS` (comma-separated), default
-  `david.soden@beaconspec.com, duane.walker@beaconspec.com`.
-- A one-shot `npm run digest -- weekly|monthly` command is provided for manual sends and
-  testing.
+- Recipients default to `david.soden@beaconspec.com, duane.walker@beaconspec.com`
+  (editable in Settings).
+- A "Send test email" button in Settings/wizard and a one-shot `npm run digest --
+  weekly|monthly` command are provided for manual sends and testing.
+- The same MailerSend integration powers forgot-password reset emails.
 
-## 9. Configuration (`.env`)
+## 9. Configuration
+
+Runtime config is **DB-backed settings** (see Configuration model in §3), edited via the
+wizard/Settings UI. Settings keys include: `setup_complete`, `graph_tenant_id`,
+`graph_client_id`, `graph_client_secret` (secret), `mailbox_upn`, `poll_interval_minutes`
+(default 15), `delete_mode` (safe|hard), `mailersend_token` (secret), `mailersend_from`,
+`digest_recipients`, `digest_weekly_cron`, `digest_monthly_cron`, `maxmind_license_key`
+(secret).
+
+Environment is minimal and infrastructural only:
 
 ```
-TENANT_ID
-CLIENT_ID
-CLIENT_SECRET
-MAILBOX_UPN
-POLL_CRON=*/15 * * * *
-MAXMIND_LICENSE_KEY
-ADMIN_USER
-ADMIN_PASSWORD_HASH
-SESSION_SECRET
-DB_PATH
-DELETE_MODE        # safe (default) | hard
-MAILERSEND_API_TOKEN
-MAILERSEND_FROM=dmarc@beaconspec.com
-DIGEST_RECIPIENTS=david.soden@beaconspec.com,duane.walker@beaconspec.com
-DIGEST_WEEKLY_CRON=0 8 * * 1      # Mondays 08:00
-DIGEST_MONTHLY_CRON=0 8 1 * *     # 1st of month 08:00
+DATA_DIR=data    # holds dmarc.db, GeoLite2-City.mmdb, app.key
+PORT=3000        # optional
 ```
 
 ## 10. Out of scope (v1)
@@ -154,7 +226,8 @@ DIGEST_MONTHLY_CRON=0 8 1 * *     # 1st of month 08:00
 Schema leaves room but these are not built now:
 - Forensic / failure (RUF / AFRF) reports.
 - SMTP TLS Reporting (TLS-RPT, JSON, RFC 8460).
-- Recommendations engine, multi-user/teams, instant (non-digest) alerts.
+- Recommendations engine and instant (non-digest) alerts.
+- SSO / external identity providers (local accounts only for now).
 
 ## 11. References
 

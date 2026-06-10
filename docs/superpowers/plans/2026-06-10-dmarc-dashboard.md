@@ -4,9 +4,16 @@
 
 **Goal:** Build a self-hosted Next.js app that polls an Office 365 mailbox via Microsoft Graph for DMARC aggregate reports, ingests them into SQLite, and presents a modern admin dashboard.
 
-**Architecture:** One Next.js 15 (App Router) container. An in-process `node-cron` worker authenticates app-only to Graph, downloads + decompresses + parses report attachments into a normalized SQLite schema (dedup + safe-delete), and the SSR dashboard (shadcn/ui + Recharts) reads aggregate queries behind a simple admin login.
+**Architecture:** One Next.js 15 (App Router) container. All config lives in a DB-backed
+settings store (secrets AES-encrypted with a key on the data volume), entered through a
+first-run **setup wizard** — the only env is `DATA_DIR`/`PORT`. An in-process `node-cron`
+worker (interval from settings, re-scheduled live) authenticates app-only to Graph,
+downloads + decompresses + parses report attachments into a normalized SQLite schema
+(dedup + safe-delete). The SSR dashboard (shadcn/ui + Recharts) sits behind multi-user
+login with roles (admin/analyst/viewer); admins get Settings + User management; users get
+forgot-password. Auth is guarded in Node-runtime server layouts (not Edge middleware).
 
-**Tech Stack:** Next.js 15, TypeScript, better-sqlite3, fast-xml-parser, @azure/msal-node, @microsoft/microsoft-graph-client, node-cron, shadcn/ui, Tailwind, Recharts, react-simple-maps, maxmind, iron-session, vitest.
+**Tech Stack:** Next.js 15, TypeScript, better-sqlite3, fast-xml-parser, @azure/msal-node, @microsoft/microsoft-graph-client, node-cron, shadcn/ui, Tailwind, Recharts, react-simple-maps, maxmind, iron-session, bcryptjs, node:crypto (AES-256-GCM), zod, vitest.
 
 ---
 
@@ -22,12 +29,12 @@ DMARC-DASH/
   Dockerfile, docker-compose.yml, .dockerignore
   vitest.config.ts
   docs/SETUP-ENTRA.md                 # Entra app-registration walkthrough
-  data/                               # mounted volume: dmarc.db, GeoLite2-City.mmdb
+  data/                               # mounted volume: dmarc.db, GeoLite2-City.mmdb, app.key
   src/
     lib/
       db/
         connection.ts                 # better-sqlite3 singleton
-        schema.sql                    # full DDL
+        schema.sql                    # full DDL (reports + setting/app_user/password_reset)
         migrate.ts                    # apply schema.sql idempotently
         repository.ts                 # insert report graph in one txn + dedup
         queries.ts                    # dashboard aggregate queries
@@ -40,24 +47,40 @@ DMARC-DASH/
         auth.ts                       # MSAL client-credentials token
         client.ts                     # list inbox, get attachments, delete, move
         mailbox.ts                    # high-level: fetchReportEmails / finalize
+      email/
+        mailersend.ts                 # MailerSend send
+        digest.ts                     # digest HTML builder
+        send-digest.ts                # window math + send (reads settings)
       geo/
-        geoip.ts                      # maxmind lookup + reverse-DNS/org cache
-      scheduler.ts                    # node-cron registration
+        geoip.ts                      # maxmind lookup
       auth/
-        session.ts                    # iron-session config
-        password.ts                   # hash/verify
-      config.ts                       # env parsing/validation (zod)
+        password.ts                   # bcrypt hash/verify
+        tokens.ts                     # reset-token generate/hash
+        session.ts                    # iron-session config (key-derived secret) + Role
+        users.ts                      # user CRUD + verifyLogin (roles)
+        users-guard.ts                # last-admin protection
+        reset.ts                      # password reset create/consume
+        guard.ts                      # server-side session + role guards
+      crypto.ts                       # app.key + AES-256-GCM secret encryption
+      settings.ts                     # DB-backed typed settings (encrypted secrets)
+      scheduler.ts                    # settings-driven, re-schedulable cron
+      config.ts                       # bootstrap env (DATA_DIR/PORT) only
     app/
-      (auth)/login/page.tsx
-      api/auth/login/route.ts
-      api/auth/logout/route.ts
-      (dashboard)/layout.tsx          # nav shell, auth guard
+      (setup)/setup/page.tsx          # first-run wizard
+      api/setup/route.ts              # complete setup; test-graph; test-email
+      (auth)/login | forgot | reset/[token] | change-password
+      api/auth/login | logout | change-password | forgot | reset
+      (dashboard)/layout.tsx          # nav shell + setup/auth guard (Node runtime)
       (dashboard)/page.tsx            # Overview
       (dashboard)/sources/page.tsx
       (dashboard)/authentication/page.tsx
       (dashboard)/policy/page.tsx
       (dashboard)/reports/page.tsx
       (dashboard)/reports/[id]/page.tsx
+      (dashboard)/settings/page.tsx   # admin: edit all settings (live re-schedule)
+      (dashboard)/users/page.tsx      # admin: user management
+      api/settings/route.ts           # admin settings GET/POST
+      api/users/route.ts + [id]/route.ts  # admin user CRUD
       (dashboard)/ingest-log/page.tsx
       instrumentation.ts              # boots scheduler on server start
     components/                       # shadcn + chart wrappers
@@ -85,7 +108,7 @@ When prompted about the non-empty directory (`docs/`, `.git/`), choose to procee
 - [ ] **Step 2: Add dependencies**
 
 ```bash
-npm i better-sqlite3 fast-xml-parser @azure/msal-node @microsoft/microsoft-graph-client node-cron iron-session zod maxmind recharts react-simple-maps d3-geo bcryptjs
+npm i better-sqlite3 fast-xml-parser @azure/msal-node @microsoft/microsoft-graph-client node-cron iron-session zod maxmind recharts react-simple-maps d3-geo bcryptjs server-only
 npm i -D vitest @types/better-sqlite3 @types/node-cron @types/bcryptjs @types/react-simple-maps tsx
 ```
 
@@ -121,7 +144,10 @@ Append:
 git add -A && git commit -m "Scaffold Next.js + TS project with deps"
 ```
 
-### Task 0.2: Config loader with validation
+### Task 0.2: Bootstrap config (infrastructural env only)
+
+All runtime config lives in the DB `setting` table (see Tasks 1.3/M7+). The ONLY env is
+infrastructural: where data lives and the HTTP port.
 
 **Files:** Create `src/lib/config.ts`, `.env.example`; Test `tests/config.test.ts`
 
@@ -130,22 +156,21 @@ git add -A && git commit -m "Scaffold Next.js + TS project with deps"
 ```ts
 // tests/config.test.ts
 import { describe, it, expect } from "vitest";
-import { parseConfig } from "@/lib/config";
+import { parseBootstrap } from "@/lib/config";
 
-describe("parseConfig", () => {
-  it("parses a full valid env", () => {
-    const cfg = parseConfig({
-      TENANT_ID: "t", CLIENT_ID: "c", CLIENT_SECRET: "s",
-      MAILBOX_UPN: "dmarc@example.com", POLL_CRON: "*/15 * * * *",
-      ADMIN_USER: "admin", ADMIN_PASSWORD_HASH: "$2a$10$abc",
-      SESSION_SECRET: "x".repeat(32), DB_PATH: "data/dmarc.db", DELETE_MODE: "safe",
-    });
-    expect(cfg.mailboxUpn).toBe("dmarc@example.com");
-    expect(cfg.deleteMode).toBe("safe");
+describe("parseBootstrap", () => {
+  it("defaults DATA_DIR to data and derives paths", () => {
+    const c = parseBootstrap({});
+    expect(c.dataDir).toBe("data");
+    expect(c.dbPath).toBe("data/dmarc.db");
+    expect(c.geoPath).toBe("data/GeoLite2-City.mmdb");
+    expect(c.keyPath).toBe("data/app.key");
+    expect(c.port).toBe(3000);
   });
-
-  it("rejects an invalid DELETE_MODE", () => {
-    expect(() => parseConfig({ DELETE_MODE: "nuke" } as any)).toThrow();
+  it("honors a custom DATA_DIR and PORT", () => {
+    const c = parseBootstrap({ DATA_DIR: "/var/dmarc", PORT: "8080" });
+    expect(c.dbPath).toBe("/var/dmarc/dmarc.db");
+    expect(c.port).toBe(8080);
   });
 });
 ```
@@ -157,43 +182,23 @@ Run: `npm test -- tests/config.test.ts`  Expected: FAIL (module not found).
 - [ ] **Step 3: Implement `src/lib/config.ts`**
 
 ```ts
-import { z } from "zod";
+import path from "node:path";
 
-const Schema = z.object({
-  TENANT_ID: z.string().min(1),
-  CLIENT_ID: z.string().min(1),
-  CLIENT_SECRET: z.string().min(1),
-  MAILBOX_UPN: z.string().email(),
-  POLL_CRON: z.string().default("*/15 * * * *"),
-  MAXMIND_LICENSE_KEY: z.string().optional(),
-  ADMIN_USER: z.string().min(1),
-  ADMIN_PASSWORD_HASH: z.string().min(1),
-  SESSION_SECRET: z.string().min(32),
-  DB_PATH: z.string().default("data/dmarc.db"),
-  DELETE_MODE: z.enum(["safe", "hard"]).default("safe"),
-  MAILERSEND_API_TOKEN: z.string().optional(),
-  MAILERSEND_FROM: z.string().default("dmarc@beaconspec.com"),
-  DIGEST_RECIPIENTS: z.string().default("david.soden@beaconspec.com,duane.walker@beaconspec.com"),
-  DIGEST_WEEKLY_CRON: z.string().default("0 8 * * 1"),
-  DIGEST_MONTHLY_CRON: z.string().default("0 8 1 * *"),
-});
-
-export function parseConfig(env: NodeJS.ProcessEnv) {
-  const p = Schema.parse(env);
+export function parseBootstrap(env: NodeJS.ProcessEnv) {
+  const dataDir = env.DATA_DIR && env.DATA_DIR.trim() ? env.DATA_DIR.trim() : "data";
+  const join = (f: string) => path.join(dataDir, f).split(path.sep).join("/");
   return {
-    tenantId: p.TENANT_ID, clientId: p.CLIENT_ID, clientSecret: p.CLIENT_SECRET,
-    mailboxUpn: p.MAILBOX_UPN, pollCron: p.POLL_CRON, maxmindKey: p.MAXMIND_LICENSE_KEY,
-    adminUser: p.ADMIN_USER, adminPasswordHash: p.ADMIN_PASSWORD_HASH,
-    sessionSecret: p.SESSION_SECRET, dbPath: p.DB_PATH, deleteMode: p.DELETE_MODE,
-    mailersendToken: p.MAILERSEND_API_TOKEN, mailersendFrom: p.MAILERSEND_FROM,
-    digestRecipients: p.DIGEST_RECIPIENTS.split(",").map((s) => s.trim()).filter(Boolean),
-    digestWeeklyCron: p.DIGEST_WEEKLY_CRON, digestMonthlyCron: p.DIGEST_MONTHLY_CRON,
+    dataDir,
+    dbPath: join("dmarc.db"),
+    geoPath: join("GeoLite2-City.mmdb"),
+    keyPath: join("app.key"),
+    port: env.PORT ? Number(env.PORT) : 3000,
   };
 }
 
-let cached: ReturnType<typeof parseConfig> | null = null;
-export function config() {
-  if (!cached) cached = parseConfig(process.env);
+let cached: ReturnType<typeof parseBootstrap> | null = null;
+export function bootstrap() {
+  if (!cached) cached = parseBootstrap(process.env);
   return cached;
 }
 ```
@@ -205,45 +210,24 @@ Run: `npm test -- tests/config.test.ts`  Expected: PASS (both tests).
 - [ ] **Step 5: Write `.env.example`**
 
 ```
-TENANT_ID=
-CLIENT_ID=
-CLIENT_SECRET=
-MAILBOX_UPN=dmarc@yourdomain.com
-POLL_CRON=*/15 * * * *
-MAXMIND_LICENSE_KEY=
-ADMIN_USER=admin
-ADMIN_PASSWORD_HASH=
-SESSION_SECRET=
-DB_PATH=data/dmarc.db
-DELETE_MODE=safe
-MAILERSEND_API_TOKEN=
-MAILERSEND_FROM=dmarc@beaconspec.com
-DIGEST_RECIPIENTS=david.soden@beaconspec.com,duane.walker@beaconspec.com
-DIGEST_WEEKLY_CRON=0 8 * * 1
-DIGEST_MONTHLY_CRON=0 8 1 * *
+# All app config (Graph creds, mailbox, poll interval, email, MaxMind) is set in the
+# in-app Setup Wizard and stored in the database. The only env is infrastructural:
+DATA_DIR=data
+PORT=3000
 ```
 
-- [ ] **Step 6: Update the config test to cover digest fields**
-
-Append to `tests/config.test.ts` inside the existing `describe`:
-```ts
-  it("splits DIGEST_RECIPIENTS into a trimmed array with defaults", () => {
-    const cfg = parseConfig({
-      TENANT_ID: "t", CLIENT_ID: "c", CLIENT_SECRET: "s",
-      MAILBOX_UPN: "dmarc@example.com", ADMIN_USER: "admin",
-      ADMIN_PASSWORD_HASH: "$2a$10$abc", SESSION_SECRET: "x".repeat(32),
-    } as any);
-    expect(cfg.digestRecipients).toEqual(["david.soden@beaconspec.com", "duane.walker@beaconspec.com"]);
-    expect(cfg.digestWeeklyCron).toBe("0 8 * * 1");
-  });
-```
-Run: `npm test -- tests/config.test.ts`  Expected: PASS.
-
-- [ ] **Step 7: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add -A && git commit -m "Add validated config loader with digest settings"
+git add -A && git commit -m "Add bootstrap config (DATA_DIR/PORT only)"
 ```
+
+> NOTE for all later tasks: anywhere the original plan referenced `config()` with
+> `cfg.tenantId`, `cfg.dbPath`, `cfg.mailboxUpn`, `cfg.deleteMode`, `cfg.mailersend*`,
+> `cfg.digest*`, `cfg.maxmindKey`, etc. — `dbPath`/`geoPath`/`keyPath`/`port` now come
+> from `bootstrap()`, and every other value comes from the **settings service**
+> (`getSetting`/`getSettings`, Task 1.3). The Graph/scheduler/digest tasks below are
+> updated accordingly.
 
 ---
 
@@ -323,11 +307,41 @@ CREATE TABLE IF NOT EXISTS ingest_log (
   processed_at INTEGER NOT NULL
 );
 
+-- Config / identity ----------------------------------------------------------
+CREATE TABLE IF NOT EXISTS setting (
+  key TEXT PRIMARY KEY,
+  value TEXT,
+  type TEXT NOT NULL DEFAULT 'string',   -- string|int|bool|secret|json
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS app_user (
+  id INTEGER PRIMARY KEY,
+  username TEXT NOT NULL UNIQUE,
+  email TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'viewer',   -- admin|analyst|viewer
+  is_active INTEGER NOT NULL DEFAULT 1,
+  must_change_password INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  last_login_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS password_reset (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  used_at INTEGER
+);
+
 CREATE INDEX IF NOT EXISTS idx_record_report ON record(report_id);
 CREATE INDEX IF NOT EXISTS idx_record_srcip ON record(source_ip_norm);
 CREATE INDEX IF NOT EXISTS idx_record_headerfrom ON record(header_from);
 CREATE INDEX IF NOT EXISTS idx_report_dates ON report(date_begin, date_end);
 CREATE INDEX IF NOT EXISTS idx_pp_domain ON policy_published(domain);
+CREATE INDEX IF NOT EXISTS idx_user_email ON app_user(email);
+CREATE INDEX IF NOT EXISTS idx_reset_token ON password_reset(token_hash);
 ```
 
 - [ ] **Step 2: Implement `src/lib/db/connection.ts`**
@@ -336,10 +350,11 @@ CREATE INDEX IF NOT EXISTS idx_pp_domain ON policy_published(domain);
 import Database from "better-sqlite3";
 import path from "node:path";
 import fs from "node:fs";
+import { bootstrap } from "@/lib/config";
 
 let db: Database.Database | null = null;
 
-export function getDb(dbPath = process.env.DB_PATH ?? "data/dmarc.db") {
+export function getDb(dbPath = bootstrap().dbPath) {
   if (db) return db;
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   db = new Database(dbPath);
@@ -383,7 +398,7 @@ describe("migrate", () => {
   it("creates all tables", () => {
     const db = migrate(TMP);
     const names = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((r: any) => r.name);
-    for (const t of ["report","policy_published","record","auth_result_dkim","auth_result_spf","policy_override_reason","report_extension","ingest_log"])
+    for (const t of ["report","policy_published","record","auth_result_dkim","auth_result_spf","policy_override_reason","report_extension","ingest_log","setting","app_user","password_reset"])
       expect(names).toContain(t);
   });
 });
@@ -399,7 +414,233 @@ Run: `npm test -- tests/migrate.test.ts`  Expected: PASS.
 git add -A && git commit -m "Add SQLite schema and migration"
 ```
 
-### Task 1.2: Repository — insert report graph with dedup
+### Task 1.2: App encryption key + AES-256-GCM helpers
+
+**Files:** Create `src/lib/crypto.ts`; Test `tests/crypto.test.ts`
+
+- [ ] **Step 1: Write the failing test `tests/crypto.test.ts`**
+
+```ts
+import { describe, it, expect, afterEach } from "vitest";
+import fs from "node:fs";
+import { getOrCreateKey, encryptSecret, decryptSecret } from "@/lib/crypto";
+
+const KEY = "data/test-app.key";
+afterEach(() => fs.rmSync(KEY, { force: true }));
+
+describe("crypto", () => {
+  it("creates a 32-byte key once and reuses it", () => {
+    const k1 = getOrCreateKey(KEY);
+    const k2 = getOrCreateKey(KEY);
+    expect(k1.length).toBe(32);
+    expect(k1.equals(k2)).toBe(true);
+  });
+  it("round-trips an encrypted secret", () => {
+    const key = getOrCreateKey(KEY);
+    const blob = encryptSecret("hunter2", key);
+    expect(blob).not.toContain("hunter2");
+    expect(decryptSecret(blob, key)).toBe("hunter2");
+  });
+  it("fails to decrypt tampered ciphertext", () => {
+    const key = getOrCreateKey(KEY);
+    const blob = encryptSecret("x", key);
+    expect(() => decryptSecret(blob.slice(0, -2) + "00", key)).toThrow();
+  });
+});
+```
+
+- [ ] **Step 2: Run test, expect FAIL**
+
+Run: `npm test -- tests/crypto.test.ts`  Expected: FAIL.
+
+- [ ] **Step 3: Implement `src/lib/crypto.ts`**
+
+```ts
+import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+
+export function getOrCreateKey(keyPath: string): Buffer {
+  if (fs.existsSync(keyPath)) {
+    const buf = fs.readFileSync(keyPath);
+    if (buf.length === 32) return buf;
+  }
+  const key = crypto.randomBytes(32);
+  fs.mkdirSync(path.dirname(keyPath), { recursive: true });
+  fs.writeFileSync(keyPath, key, { mode: 0o600 });
+  try { fs.chmodSync(keyPath, 0o600); } catch { /* windows */ }
+  return key;
+}
+
+// Format: base64(iv[12] || tag[16] || ciphertext)
+export function encryptSecret(plain: string, key: Buffer): string {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const ct = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return Buffer.concat([iv, tag, ct]).toString("base64");
+}
+
+export function decryptSecret(blob: string, key: Buffer): string {
+  const raw = Buffer.from(blob, "base64");
+  const iv = raw.subarray(0, 12);
+  const tag = raw.subarray(12, 28);
+  const ct = raw.subarray(28);
+  const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+  decipher.setAuthTag(tag);
+  return Buffer.concat([decipher.update(ct), decipher.final()]).toString("utf8");
+}
+```
+
+- [ ] **Step 4: Run test, expect PASS**
+
+Run: `npm test -- tests/crypto.test.ts`  Expected: PASS (3 tests).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add -A && git commit -m "Add app encryption key and AES-256-GCM helpers"
+```
+
+### Task 1.3: Settings service (DB-backed config with encrypted secrets)
+
+**Files:** Create `src/lib/settings.ts`; Test `tests/settings.test.ts`
+
+- [ ] **Step 1: Write the failing test `tests/settings.test.ts`**
+
+```ts
+import { describe, it, expect, afterEach } from "vitest";
+import fs from "node:fs";
+import { migrate } from "@/lib/db/migrate";
+import { closeDb, getDb } from "@/lib/db/connection";
+import { setSetting, getSetting, getSettings, SETTING_DEFS } from "@/lib/settings";
+
+const TMP = "data/test-settings.db";
+const KEY = "data/test-settings.key";
+afterEach(() => { closeDb(); for (const s of ["","-wal","-shm"]) fs.rmSync(TMP+s,{force:true}); fs.rmSync(KEY,{force:true}); });
+
+describe("settings", () => {
+  it("returns typed defaults when unset", () => {
+    migrate(TMP);
+    expect(getSetting("poll_interval_minutes", TMP, KEY)).toBe(15);
+    expect(getSetting("delete_mode", TMP, KEY)).toBe("safe");
+    expect(getSetting("setup_complete", TMP, KEY)).toBe(false);
+  });
+  it("persists and coerces int/bool", () => {
+    migrate(TMP);
+    setSetting("poll_interval_minutes", 30, TMP, KEY);
+    setSetting("setup_complete", true, TMP, KEY);
+    expect(getSetting("poll_interval_minutes", TMP, KEY)).toBe(30);
+    expect(getSetting("setup_complete", TMP, KEY)).toBe(true);
+  });
+  it("encrypts secret-typed settings at rest", () => {
+    migrate(TMP);
+    setSetting("graph_client_secret", "topsecret", TMP, KEY);
+    const raw = (getDb(TMP).prepare("SELECT value FROM setting WHERE key='graph_client_secret'").get() as any).value;
+    expect(raw).not.toContain("topsecret");
+    expect(getSetting("graph_client_secret", TMP, KEY)).toBe("topsecret");
+  });
+  it("getSettings returns a typed bag", () => {
+    migrate(TMP);
+    const all = getSettings(TMP, KEY);
+    expect(all.poll_interval_minutes).toBe(15);
+    expect(Object.keys(all)).toEqual(expect.arrayContaining(Object.keys(SETTING_DEFS)));
+  });
+});
+```
+
+- [ ] **Step 2: Run test, expect FAIL**
+
+Run: `npm test -- tests/settings.test.ts`  Expected: FAIL.
+
+- [ ] **Step 3: Implement `src/lib/settings.ts`**
+
+```ts
+import { getDb } from "@/lib/db/connection";
+import { bootstrap } from "@/lib/config";
+import { getOrCreateKey, encryptSecret, decryptSecret } from "@/lib/crypto";
+
+type SettingType = "string" | "int" | "bool" | "secret" | "json";
+interface Def { type: SettingType; default: unknown }
+
+export const SETTING_DEFS: Record<string, Def> = {
+  setup_complete:        { type: "bool",   default: false },
+  graph_tenant_id:       { type: "string", default: "" },
+  graph_client_id:       { type: "string", default: "" },
+  graph_client_secret:   { type: "secret", default: "" },
+  mailbox_upn:           { type: "string", default: "" },
+  poll_interval_minutes: { type: "int",    default: 15 },
+  delete_mode:           { type: "string", default: "safe" },     // safe|hard
+  mailersend_token:      { type: "secret", default: "" },
+  mailersend_from:       { type: "string", default: "dmarc@beaconspec.com" },
+  digest_recipients:     { type: "json",   default: ["david.soden@beaconspec.com", "duane.walker@beaconspec.com"] },
+  digest_weekly_cron:    { type: "string", default: "0 8 * * 1" },
+  digest_monthly_cron:   { type: "string", default: "0 8 1 * *" },
+  maxmind_license_key:   { type: "secret", default: "" },
+};
+
+function key(keyPath?: string) { return getOrCreateKey(keyPath ?? bootstrap().keyPath); }
+
+function decode(type: SettingType, raw: string, keyPath?: string): unknown {
+  switch (type) {
+    case "int": return Number(raw);
+    case "bool": return raw === "true" || raw === "1";
+    case "json": return JSON.parse(raw);
+    case "secret": return raw ? decryptSecret(raw, key(keyPath)) : "";
+    default: return raw;
+  }
+}
+function encode(type: SettingType, value: unknown, keyPath?: string): string {
+  switch (type) {
+    case "int": return String(Math.trunc(Number(value)));
+    case "bool": return value ? "true" : "false";
+    case "json": return JSON.stringify(value);
+    case "secret": return value ? encryptSecret(String(value), key(keyPath)) : "";
+    default: return String(value ?? "");
+  }
+}
+
+export function getSetting<T = unknown>(k: string, dbPath?: string, keyPath?: string): T {
+  const def = SETTING_DEFS[k];
+  if (!def) throw new Error(`Unknown setting: ${k}`);
+  const row = getDb(dbPath).prepare("SELECT value FROM setting WHERE key=?").get(k) as { value: string } | undefined;
+  if (!row || row.value === null || row.value === "") {
+    return (def.type === "secret" ? "" : def.default) as T;
+  }
+  return decode(def.type, row.value, keyPath) as T;
+}
+
+export function setSetting(k: string, value: unknown, dbPath?: string, keyPath?: string): void {
+  const def = SETTING_DEFS[k];
+  if (!def) throw new Error(`Unknown setting: ${k}`);
+  getDb(dbPath).prepare(
+    `INSERT INTO setting (key,value,type,updated_at) VALUES (?,?,?,?)
+     ON CONFLICT(key) DO UPDATE SET value=excluded.value, type=excluded.type, updated_at=excluded.updated_at`
+  ).run(k, encode(def.type, value, keyPath), def.type, Math.floor(Date.now() / 1000));
+}
+
+export function setSettings(values: Record<string, unknown>, dbPath?: string, keyPath?: string): void {
+  for (const [k, v] of Object.entries(values)) if (k in SETTING_DEFS) setSetting(k, v, dbPath, keyPath);
+}
+
+export function getSettings(dbPath?: string, keyPath?: string): Record<string, any> {
+  const out: Record<string, any> = {};
+  for (const k of Object.keys(SETTING_DEFS)) out[k] = getSetting(k, dbPath, keyPath);
+  return out;
+}
+```
+
+- [ ] **Step 4: Run test, expect PASS**
+
+Run: `npm test -- tests/settings.test.ts`  Expected: PASS (4 tests).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add -A && git commit -m "Add DB-backed settings service with encrypted secrets"
+```
+
+### Task 1.4: Repository — insert report graph with dedup
 
 **Files:** Create `src/lib/ingest/model.ts`, `src/lib/db/repository.ts`; Test `tests/repository.test.ts`
 
@@ -1372,20 +1613,18 @@ git add -A && git commit -m "Add mailbox orchestration with safe-delete/move log
 ```ts
 import "dotenv/config";
 import { migrate } from "@/lib/db/migrate";
-import { config } from "@/lib/config";
-import { GraphAuth } from "@/lib/graph/auth";
-import { GraphClient } from "@/lib/graph/client";
-import { processMailbox } from "@/lib/graph/mailbox";
+import { runPollOnce } from "@/lib/scheduler";
 
 (async () => {
   migrate();
-  const cfg = config();
-  const auth = new GraphAuth({ tenantId: cfg.tenantId, clientId: cfg.clientId, clientSecret: cfg.clientSecret });
-  const client = new GraphClient(auth, cfg.mailboxUpn);
-  const result = await processMailbox(client, { deleteMode: cfg.deleteMode, dbPath: cfg.dbPath });
+  const result = await runPollOnce();   // reads Graph creds + delete_mode from settings
   console.log("Poll result:", result);
 })().catch((e) => { console.error(e); process.exit(1); });
 ```
+
+(Graph credentials, mailbox, and delete mode all come from the settings service now, so
+this script needs the Setup Wizard to have been completed, OR settings pre-seeded. It no
+longer reads any `.env` creds. `runPollOnce` is defined in Task 6.1.)
 
 - [ ] **Step 2: Add `dotenv` dev dep and script**
 
@@ -1394,9 +1633,9 @@ npm i -D dotenv
 ```
 Add to `package.json` scripts: `"poll:once": "tsx scripts/poll-once.ts"`.
 
-- [ ] **Step 3: Run after `.env` is filled (manual, post Entra setup in Milestone 10)**
+- [ ] **Step 3: Run after the wizard is complete (manual, post Entra setup in Milestone 10)**
 
-Run: `npm run poll:once`  Expected: prints a result object; verify rows appear in `data/dmarc.db`. Document this step in `docs/SETUP-ENTRA.md`.
+Run: `npm run poll:once`  Expected: prints a result object; verify rows appear in the DB. Document this step in `docs/SETUP-ENTRA.md`.
 
 - [ ] **Step 4: Commit**
 
@@ -1415,40 +1654,83 @@ git add -A && git commit -m "Add one-shot poll script for live smoke test"
 - [ ] **Step 1: Implement `src/lib/scheduler.ts`**
 
 ```ts
-import cron from "node-cron";
+import cron, { type ScheduledTask } from "node-cron";
 import { migrate } from "@/lib/db/migrate";
-import { config } from "@/lib/config";
+import { getSetting } from "@/lib/settings";
 import { GraphAuth } from "@/lib/graph/auth";
 import { GraphClient } from "@/lib/graph/client";
 import { processMailbox } from "@/lib/graph/mailbox";
 
+let pollTask: ScheduledTask | null = null;
+let weeklyTask: ScheduledTask | null = null;
+let monthlyTask: ScheduledTask | null = null;
 let started = false;
 let running = false;
 
+// Poll interval is stored in MINUTES; convert to a cron expression.
+function minutesToCron(min: number): string {
+  const m = Math.max(1, Math.trunc(min));
+  if (m < 60) return `*/${m} * * * *`;
+  const hours = Math.max(1, Math.trunc(m / 60));
+  return `0 */${hours} * * *`;
+}
+
 export async function runPollOnce() {
-  if (running) { console.log("[poll] previous run still in progress, skipping"); return; }
+  if (running) { console.log("[poll] previous run still in progress, skipping"); return { skipped: true }; }
   running = true;
   try {
-    const cfg = config();
-    const auth = new GraphAuth({ tenantId: cfg.tenantId, clientId: cfg.clientId, clientSecret: cfg.clientSecret });
-    const client = new GraphClient(auth, cfg.mailboxUpn);
-    const res = await processMailbox(client, { deleteMode: cfg.deleteMode, dbPath: cfg.dbPath });
+    const tenantId = getSetting<string>("graph_tenant_id");
+    const clientId = getSetting<string>("graph_client_id");
+    const clientSecret = getSetting<string>("graph_client_secret");
+    const mailbox = getSetting<string>("mailbox_upn");
+    if (!tenantId || !clientId || !clientSecret || !mailbox) {
+      console.log("[poll] Graph not configured yet; skipping");
+      return { skipped: true };
+    }
+    const auth = new GraphAuth({ tenantId, clientId, clientSecret });
+    const client = new GraphClient(auth, mailbox);
+    const deleteMode = getSetting<"safe" | "hard">("delete_mode");
+    const res = await processMailbox(client, { deleteMode });
     console.log(`[poll] ${new Date().toISOString()}`, res);
+    return res;
   } catch (e) {
     console.error("[poll] error:", e);
+    return { error: String((e as any)?.message ?? e) };
   } finally {
     running = false;
   }
 }
 
+// (Re)schedule the poll job from the current settings. Safe to call repeatedly —
+// call it after the wizard finishes or whenever the interval setting changes.
+export function reschedulePoll() {
+  pollTask?.stop();
+  if (!getSetting<boolean>("setup_complete")) {
+    console.log("[scheduler] setup not complete; poll disabled");
+    return;
+  }
+  const expr = minutesToCron(getSetting<number>("poll_interval_minutes"));
+  pollTask = cron.schedule(expr, () => { void runPollOnce(); });
+  console.log(`[scheduler] poll scheduled "${expr}"`);
+}
+
+// (Re)schedule digests from settings (body filled in Task D.4).
+export function rescheduleDigests() {
+  weeklyTask?.stop(); monthlyTask?.stop();
+  weeklyTask = null; monthlyTask = null;
+  // Task D.4 replaces this stub to wire sendDigest to digest_weekly_cron / digest_monthly_cron.
+}
+
+// Re-apply both schedules after settings change (wizard finish, Settings save).
+export function applySettingsChange() { reschedulePoll(); rescheduleDigests(); }
+
 export function startScheduler() {
   if (started) return;
   started = true;
   migrate();
-  const cfg = config();
-  if (!cron.validate(cfg.pollCron)) throw new Error(`Invalid POLL_CRON: ${cfg.pollCron}`);
-  cron.schedule(cfg.pollCron, () => { void runPollOnce(); });
-  console.log(`[scheduler] started with cron "${cfg.pollCron}"`);
+  reschedulePoll();
+  rescheduleDigests();
+  console.log("[scheduler] started");
 }
 ```
 
@@ -1476,23 +1758,112 @@ export default nextConfig;
 
 - [ ] **Step 4: Verify it boots**
 
-Run: `npm run dev`  Expected: console shows `[scheduler] started with cron "*/15 * * * *"` (with a filled `.env.local`). Stop the server.
+Run: `npm run dev`  Expected: console shows `[scheduler] started` and `[scheduler] setup not complete; poll disabled` (no settings yet). Stop the server.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -A && git commit -m "Add in-process cron scheduler booted via instrumentation"
+git add -A && git commit -m "Add settings-driven, re-schedulable cron scheduler"
 ```
 
 ---
 
-## Milestone 7: Authentication (admin login)
+## Milestone 6.5: Email client (MailerSend)
 
-### Task 7.1: Password hashing + session config
+> Built before M7 because the setup wizard's "Send test email", forgot-password emails,
+> and digests all use it.
 
-**Files:** Create `src/lib/auth/password.ts`, `src/lib/auth/session.ts`, `scripts/hash-password.ts`; Test `tests/password.test.ts`
+### Task 6.5: MailerSend client
 
-- [ ] **Step 1: Write the failing test `tests/password.test.ts`**
+**Files:** Create `src/lib/email/mailersend.ts`; Test `tests/mailersend.test.ts`
+
+- [ ] **Step 1: Write the failing test (mock fetch, assert request shape)**
+
+```ts
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { sendEmail } from "@/lib/email/mailersend";
+
+describe("sendEmail", () => {
+  beforeEach(() => { vi.restoreAllMocks(); });
+  it("POSTs to MailerSend with auth header and recipients", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 202, text: async () => "" });
+    vi.stubGlobal("fetch", fetchMock);
+    await sendEmail({
+      token: "tok", from: "dmarc@beaconspec.com", fromName: "DMARC",
+      to: ["a@x.com", "b@x.com"], subject: "Weekly", html: "<p>hi</p>",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.mailersend.com/v1/email");
+    expect((init.headers as any).Authorization).toBe("Bearer tok");
+    const body = JSON.parse(init.body);
+    expect(body.to).toEqual([{ email: "a@x.com" }, { email: "b@x.com" }]);
+    expect(body.subject).toBe("Weekly");
+  });
+
+  it("throws on non-2xx", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 422, text: async () => "bad" }));
+    await expect(sendEmail({ token: "t", from: "f@x.com", to: ["a@x.com"], subject: "s", html: "h" }))
+      .rejects.toThrow(/422/);
+  });
+});
+```
+
+- [ ] **Step 2: Run test, expect FAIL**
+
+Run: `npm test -- tests/mailersend.test.ts`  Expected: FAIL.
+
+- [ ] **Step 3: Implement `src/lib/email/mailersend.ts`**
+
+```ts
+export interface SendEmailOpts {
+  token: string; from: string; fromName?: string;
+  to: string[]; subject: string; html: string; text?: string;
+}
+
+export async function sendEmail(o: SendEmailOpts): Promise<void> {
+  const res = await fetch("https://api.mailersend.com/v1/email", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${o.token}`,
+      "Content-Type": "application/json",
+      "X-Requested-With": "XMLHttpRequest",
+    },
+    body: JSON.stringify({
+      from: { email: o.from, name: o.fromName ?? "DMARC Dashboard" },
+      to: o.to.map((email) => ({ email })),
+      subject: o.subject,
+      html: o.html,
+      text: o.text ?? o.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(),
+    }),
+  });
+  if (!res.ok) throw new Error(`MailerSend send failed: ${res.status} ${await res.text()}`);
+}
+```
+
+- [ ] **Step 4: Run test, expect PASS**
+
+Run: `npm test -- tests/mailersend.test.ts`  Expected: PASS (2 tests).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add -A && git commit -m "Add MailerSend email client"
+```
+
+---
+
+## Milestone 7: Users, roles, sessions, setup wizard, password reset
+
+> Auth is guarded in **Node-runtime server layouts** (which can reach SQLite and the app
+> key file), NOT in Edge middleware. iron-session's cookie password is derived from the
+> app encryption key on the data volume.
+
+### Task 7.1: Auth primitives — password, reset tokens, session, role guards, user service
+
+**Files:** Create `src/lib/auth/password.ts`, `src/lib/auth/tokens.ts`, `src/lib/auth/session.ts`, `src/lib/auth/users.ts`, `src/lib/auth/guard.ts`; Tests `tests/password.test.ts`, `tests/users.test.ts`
+
+- [ ] **Step 1: Write `tests/password.test.ts`**
 
 ```ts
 import { describe, it, expect } from "vitest";
@@ -1507,9 +1878,7 @@ describe("password", () => {
 });
 ```
 
-- [ ] **Step 2: Run test, expect FAIL**
-
-Run: `npm test -- tests/password.test.ts`  Expected: FAIL.
+- [ ] **Step 2: Run test, expect FAIL**; Run: `npm test -- tests/password.test.ts`
 
 - [ ] **Step 3: Implement `src/lib/auth/password.ts`**
 
@@ -1523,41 +1892,443 @@ export function verifyPassword(plain: string, hash: string): boolean {
 
 - [ ] **Step 4: Run test, expect PASS**
 
-Run: `npm test -- tests/password.test.ts`  Expected: PASS.
+- [ ] **Step 5: Implement `src/lib/auth/tokens.ts`** (reset tokens — random, stored hashed)
 
-- [ ] **Step 5: Implement `src/lib/auth/session.ts`**
+```ts
+import crypto from "node:crypto";
+export function generateResetToken(): { token: string; tokenHash: string } {
+  const token = crypto.randomBytes(32).toString("hex");
+  return { token, tokenHash: hashToken(token) };
+}
+export function hashToken(token: string): string {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
+```
+
+- [ ] **Step 6: Implement `src/lib/auth/session.ts`** (cookie secret derived from app key)
 
 ```ts
 import type { SessionOptions } from "iron-session";
+import { getOrCreateKey } from "@/lib/crypto";
+import { bootstrap } from "@/lib/config";
 
-export interface SessionData { user?: string; loggedIn: boolean; }
+export type Role = "admin" | "analyst" | "viewer";
+export interface SessionData {
+  userId?: number;
+  username?: string;
+  role?: Role;
+  loggedIn: boolean;
+  mustChangePassword?: boolean;
+}
 
-export const sessionOptions: SessionOptions = {
-  password: process.env.SESSION_SECRET ?? "dev-only-insecure-secret-change-me-32x",
-  cookieName: "dmarc_session",
-  cookieOptions: { secure: process.env.NODE_ENV === "production", httpOnly: true, sameSite: "lax" },
-};
+export function sessionOptions(): SessionOptions {
+  // 64-hex-char secret from the app key file (>= 32 chars required by iron-session).
+  const secret = getOrCreateKey(bootstrap().keyPath).toString("hex");
+  return {
+    password: secret,
+    cookieName: "dmarc_session",
+    cookieOptions: { secure: process.env.NODE_ENV === "production", httpOnly: true, sameSite: "lax" },
+  };
+}
 ```
 
-- [ ] **Step 6: Implement `scripts/hash-password.ts`** (admin convenience)
+- [ ] **Step 7: Write `tests/users.test.ts`**
 
 ```ts
-import { hashPassword } from "@/lib/auth/password";
-const pw = process.argv[2];
-if (!pw) { console.error("usage: tsx scripts/hash-password.ts <password>"); process.exit(1); }
-console.log(hashPassword(pw));
+import { describe, it, expect, afterEach } from "vitest";
+import fs from "node:fs";
+import { migrate } from "@/lib/db/migrate";
+import { closeDb } from "@/lib/db/connection";
+import { createUser, verifyLogin, listUsers, adminExists, countAdmins, updateUser, setPassword, deleteUser } from "@/lib/auth/users";
+
+const TMP = "data/test-users.db";
+afterEach(() => { closeDb(); for (const s of ["","-wal","-shm"]) fs.rmSync(TMP+s,{force:true}); });
+
+describe("users", () => {
+  it("creates an admin and logs in by username or email", () => {
+    migrate(TMP);
+    expect(adminExists(TMP)).toBe(false);
+    createUser({ username: "admin", email: "a@x.com", password: "pw123456", role: "admin" }, TMP);
+    expect(adminExists(TMP)).toBe(true);
+    expect(countAdmins(TMP)).toBe(1);
+    expect(verifyLogin("admin", "pw123456", TMP)?.role).toBe("admin");
+    expect(verifyLogin("a@x.com", "pw123456", TMP)?.username).toBe("admin");
+    expect(verifyLogin("admin", "wrong", TMP)).toBeNull();
+  });
+  it("rejects login for inactive users", () => {
+    migrate(TMP);
+    const u = createUser({ username: "v", email: "v@x.com", password: "pw123456", role: "viewer" }, TMP);
+    updateUser(u.id, { isActive: false }, TMP);
+    expect(verifyLogin("v", "pw123456", TMP)).toBeNull();
+  });
+  it("sets a new password and lists/deletes users", () => {
+    migrate(TMP);
+    const u = createUser({ username: "n", email: "n@x.com", password: "pw123456", role: "analyst" }, TMP);
+    setPassword(u.id, "newpass123", TMP);
+    expect(verifyLogin("n", "newpass123", TMP)?.id).toBe(u.id);
+    expect(listUsers(TMP).length).toBe(1);
+    deleteUser(u.id, TMP);
+    expect(listUsers(TMP).length).toBe(0);
+  });
+});
 ```
-Add script: `"hash:password": "tsx scripts/hash-password.ts"`.
+
+- [ ] **Step 8: Run test, expect FAIL**; Run: `npm test -- tests/users.test.ts`
+
+- [ ] **Step 9: Implement `src/lib/auth/users.ts`**
+
+```ts
+import { getDb } from "@/lib/db/connection";
+import { hashPassword, verifyPassword } from "./password";
+import type { Role } from "./session";
+
+export interface AppUser {
+  id: number; username: string; email: string; role: Role;
+  isActive: boolean; mustChangePassword: boolean;
+}
+
+function mapUser(r: any): AppUser {
+  return { id: r.id, username: r.username, email: r.email, role: r.role,
+    isActive: !!r.is_active, mustChangePassword: !!r.must_change_password };
+}
+
+export function createUser(
+  p: { username: string; email: string; password: string; role: Role; mustChangePassword?: boolean },
+  dbPath?: string,
+): AppUser {
+  const id = getDb(dbPath).prepare(
+    `INSERT INTO app_user (username,email,password_hash,role,is_active,must_change_password,created_at)
+     VALUES (?,?,?,?,1,?,?)`
+  ).run(p.username, p.email.toLowerCase(), hashPassword(p.password), p.role,
+    p.mustChangePassword ? 1 : 0, Math.floor(Date.now() / 1000)).lastInsertRowid as number;
+  return getUserById(id, dbPath)!;
+}
+
+export function getUserById(id: number, dbPath?: string): AppUser | null {
+  const r = getDb(dbPath).prepare(`SELECT * FROM app_user WHERE id=?`).get(id);
+  return r ? mapUser(r) : null;
+}
+
+export function getUserByLogin(login: string, dbPath?: string): any {
+  return getDb(dbPath).prepare(
+    `SELECT * FROM app_user WHERE username=? OR email=?`
+  ).get(login, login.toLowerCase());
+}
+
+export function getUserByEmail(email: string, dbPath?: string): AppUser | null {
+  const r = getDb(dbPath).prepare(`SELECT * FROM app_user WHERE email=?`).get(email.toLowerCase());
+  return r ? mapUser(r) : null;
+}
+
+export function verifyLogin(login: string, password: string, dbPath?: string): AppUser | null {
+  const r = getUserByLogin(login, dbPath);
+  if (!r || !r.is_active) return null;
+  if (!verifyPassword(password, r.password_hash)) return null;
+  getDb(dbPath).prepare(`UPDATE app_user SET last_login_at=? WHERE id=?`).run(Math.floor(Date.now() / 1000), r.id);
+  return mapUser(r);
+}
+
+export function listUsers(dbPath?: string): AppUser[] {
+  return (getDb(dbPath).prepare(`SELECT * FROM app_user ORDER BY username`).all() as any[]).map(mapUser);
+}
+
+export function updateUser(id: number, p: { role?: Role; isActive?: boolean; email?: string }, dbPath?: string): void {
+  const cur = getDb(dbPath).prepare(`SELECT * FROM app_user WHERE id=?`).get(id) as any;
+  if (!cur) return;
+  getDb(dbPath).prepare(`UPDATE app_user SET role=?, is_active=?, email=? WHERE id=?`).run(
+    p.role ?? cur.role,
+    p.isActive === undefined ? cur.is_active : (p.isActive ? 1 : 0),
+    (p.email ?? cur.email).toLowerCase(), id);
+}
+
+export function setPassword(id: number, newPassword: string, dbPath?: string): void {
+  getDb(dbPath).prepare(`UPDATE app_user SET password_hash=?, must_change_password=0 WHERE id=?`)
+    .run(hashPassword(newPassword), id);
+}
+
+export function deleteUser(id: number, dbPath?: string): void {
+  getDb(dbPath).prepare(`DELETE FROM app_user WHERE id=?`).run(id);
+}
+
+export function adminExists(dbPath?: string): boolean { return countAdmins(dbPath) > 0; }
+export function countAdmins(dbPath?: string): number {
+  return (getDb(dbPath).prepare(`SELECT COUNT(*) c FROM app_user WHERE role='admin' AND is_active=1`).get() as any).c;
+}
+```
+
+- [ ] **Step 10: Run test, expect PASS** (3 tests)
+
+- [ ] **Step 11: Implement `src/lib/auth/guard.ts`** (server-side session + role guards)
+
+```ts
+import "server-only";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
+import { getIronSession } from "iron-session";
+import { sessionOptions, type SessionData, type Role } from "./session";
+import { adminExists } from "./users";
+import { getSetting } from "@/lib/settings";
+
+export async function getSession(): Promise<SessionData> {
+  return getIronSession<SessionData>(await cookies(), sessionOptions());
+}
+
+export function isSetupComplete(): boolean {
+  return getSetting<boolean>("setup_complete") && adminExists();
+}
+
+export async function requireSetupComplete() {
+  if (!isSetupComplete()) redirect("/setup");
+}
+
+export async function requireUser(): Promise<SessionData> {
+  const s = await getSession();
+  if (!s.loggedIn) redirect("/login");
+  return s;
+}
+
+export async function requireRole(...roles: Role[]): Promise<SessionData> {
+  const s = await requireUser();
+  if (!s.role || !roles.includes(s.role)) redirect("/");
+  return s;
+}
+```
+
+- [ ] **Step 12: Commit**
+
+```bash
+git add -A && git commit -m "Add auth primitives: password, tokens, session, users, guards"
+```
+
+### Task 7.2: Setup wizard (API + UI)
+
+**Files:** Create `src/app/api/setup/route.ts`, `src/app/api/setup/test-graph/route.ts`, `src/app/api/setup/test-email/route.ts`, `src/app/(setup)/layout.tsx`, `src/app/(setup)/setup/page.tsx`
+
+- [ ] **Step 1: Implement `src/app/api/setup/route.ts`** (completes setup once, then auto-logs-in)
+
+```ts
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { getIronSession } from "iron-session";
+import { cookies } from "next/headers";
+import { sessionOptions, type SessionData } from "@/lib/auth/session";
+import { isSetupComplete } from "@/lib/auth/guard";
+import { createUser } from "@/lib/auth/users";
+import { setSettings, setSetting } from "@/lib/settings";
+import { applySettingsChange } from "@/lib/scheduler";
+
+const Body = z.object({
+  admin: z.object({ username: z.string().min(1), email: z.string().email(), password: z.string().min(8) }),
+  graph: z.object({ tenantId: z.string().min(1), clientId: z.string().min(1), clientSecret: z.string().min(1), mailboxUpn: z.string().email() }),
+  poll: z.object({ intervalMinutes: z.number().int().min(1).max(1440), deleteMode: z.enum(["safe", "hard"]) }),
+  email: z.object({ token: z.string(), from: z.string(), recipients: z.array(z.string()), weeklyCron: z.string(), monthlyCron: z.string() }).optional(),
+  maxmind: z.object({ key: z.string() }).optional(),
+});
+
+export async function POST(req: Request) {
+  if (isSetupComplete()) return NextResponse.json({ error: "Setup already complete" }, { status: 403 });
+  const parsed = Body.safeParse(await req.json());
+  if (!parsed.success) return NextResponse.json({ error: parsed.error.message }, { status: 400 });
+  const b = parsed.data;
+
+  const admin = createUser({ username: b.admin.username, email: b.admin.email, password: b.admin.password, role: "admin" });
+  setSettings({
+    graph_tenant_id: b.graph.tenantId, graph_client_id: b.graph.clientId,
+    graph_client_secret: b.graph.clientSecret, mailbox_upn: b.graph.mailboxUpn,
+    poll_interval_minutes: b.poll.intervalMinutes, delete_mode: b.poll.deleteMode,
+  });
+  if (b.email) setSettings({
+    mailersend_token: b.email.token, mailersend_from: b.email.from,
+    digest_recipients: b.email.recipients, digest_weekly_cron: b.email.weeklyCron, digest_monthly_cron: b.email.monthlyCron,
+  });
+  if (b.maxmind) setSetting("maxmind_license_key", b.maxmind.key);
+  setSetting("setup_complete", true);
+  applySettingsChange();
+
+  const session = await getIronSession<SessionData>(await cookies(), sessionOptions());
+  session.userId = admin.id; session.username = admin.username; session.role = "admin"; session.loggedIn = true;
+  await session.save();
+  return NextResponse.json({ ok: true });
+}
+```
+
+- [ ] **Step 2: Implement `src/app/api/setup/test-graph/route.ts`**
+
+```ts
+import { NextResponse } from "next/server";
+import { GraphAuth } from "@/lib/graph/auth";
+import { GraphClient } from "@/lib/graph/client";
+
+export async function POST(req: Request) {
+  const { tenantId, clientId, clientSecret, mailboxUpn } = await req.json();
+  try {
+    const client = new GraphClient(new GraphAuth({ tenantId, clientId, clientSecret }), mailboxUpn);
+    const msgs = await client.listInbox(1);
+    return NextResponse.json({ ok: true, sample: msgs.length });
+  } catch (e: any) {
+    return NextResponse.json({ ok: false, error: String(e?.message ?? e) }, { status: 200 });
+  }
+}
+```
+
+- [ ] **Step 3: Implement `src/app/api/setup/test-email/route.ts`**
+
+```ts
+import { NextResponse } from "next/server";
+import { sendEmail } from "@/lib/email/mailersend";
+
+export async function POST(req: Request) {
+  const { token, from, recipients } = await req.json();
+  try {
+    await sendEmail({ token, from, fromName: "DMARC Dashboard", to: recipients,
+      subject: "DMARC Dashboard test email", html: "<p>Your MailerSend configuration works.</p>" });
+    return NextResponse.json({ ok: true });
+  } catch (e: any) {
+    return NextResponse.json({ ok: false, error: String(e?.message ?? e) }, { status: 200 });
+  }
+}
+```
+
+- [ ] **Step 4: Implement `src/app/(setup)/layout.tsx`** (block wizard once setup is done)
+
+```tsx
+import { redirect } from "next/navigation";
+import { isSetupComplete } from "@/lib/auth/guard";
+
+export const dynamic = "force-dynamic";
+
+export default function SetupLayout({ children }: { children: React.ReactNode }) {
+  if (isSetupComplete()) redirect("/");
+  return <div className="min-h-screen bg-muted/30">{children}</div>;
+}
+```
+
+- [ ] **Step 5: Implement `src/app/(setup)/setup/page.tsx`** (multi-step wizard)
+
+A client component with a step index (0..4) and one state object. Steps: (1) Admin account
+[username, email, password], (2) Microsoft Graph [tenantId, clientId, clientSecret,
+mailboxUpn] with a "Test connection" button POSTing to `/api/setup/test-graph`, (3)
+Polling [intervalMinutes default 15, deleteMode select safe/hard], (4) Email (optional)
+[token, from default `dmarc@beaconspec.com`, recipients default the two beaconspec
+addresses, weeklyCron `0 8 * * 1`, monthlyCron `0 8 1 * *`] with a "Send test email"
+button POSTing to `/api/setup/test-email`, (5) GeoIP (optional) [maxmind key]. A final
+"Finish" button POSTs the whole object to `/api/setup` then `router.push("/")`. Use shadcn
+`Card`, `Button`, `Input`, `Select`; show inline test results. Keep all fields controlled.
+
+```tsx
+"use client";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+
+const RECIPIENTS_DEFAULT = "david.soden@beaconspec.com, duane.walker@beaconspec.com";
+
+export default function SetupWizard() {
+  const router = useRouter();
+  const [step, setStep] = useState(0);
+  const [msg, setMsg] = useState("");
+  const [f, setF] = useState({
+    username: "", email: "", password: "",
+    tenantId: "", clientId: "", clientSecret: "", mailboxUpn: "",
+    intervalMinutes: 15, deleteMode: "safe",
+    token: "", from: "dmarc@beaconspec.com", recipients: RECIPIENTS_DEFAULT,
+    weeklyCron: "0 8 * * 1", monthlyCron: "0 8 1 * *", maxmind: "",
+  });
+  const set = (k: string, v: any) => setF((s) => ({ ...s, [k]: v }));
+
+  async function testGraph() {
+    setMsg("Testing…");
+    const r = await fetch("/api/setup/test-graph", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tenantId: f.tenantId, clientId: f.clientId, clientSecret: f.clientSecret, mailboxUpn: f.mailboxUpn }) }).then((r) => r.json());
+    setMsg(r.ok ? `✅ Connected (inbox reachable)` : `❌ ${r.error}`);
+  }
+  async function testEmail() {
+    setMsg("Sending…");
+    const r = await fetch("/api/setup/test-email", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: f.token, from: f.from, recipients: f.recipients.split(",").map((s) => s.trim()).filter(Boolean) }) }).then((r) => r.json());
+    setMsg(r.ok ? "✅ Test email sent" : `❌ ${r.error}`);
+  }
+  async function finish() {
+    const body = {
+      admin: { username: f.username, email: f.email, password: f.password },
+      graph: { tenantId: f.tenantId, clientId: f.clientId, clientSecret: f.clientSecret, mailboxUpn: f.mailboxUpn },
+      poll: { intervalMinutes: Number(f.intervalMinutes), deleteMode: f.deleteMode },
+      email: f.token ? { token: f.token, from: f.from, recipients: f.recipients.split(",").map((s) => s.trim()).filter(Boolean), weeklyCron: f.weeklyCron, monthlyCron: f.monthlyCron } : undefined,
+      maxmind: f.maxmind ? { key: f.maxmind } : undefined,
+    };
+    const r = await fetch("/api/setup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if (r.ok) router.push("/"); else setMsg("❌ " + (await r.json()).error);
+  }
+
+  const input = "w-full rounded-md border px-3 py-2";
+  return (
+    <div className="mx-auto max-w-lg p-8">
+      <h1 className="mb-6 text-2xl font-semibold">DMARC Dashboard setup</h1>
+      <div className="space-y-3 rounded-xl border bg-background p-6">
+        {step === 0 && (<>
+          <h2 className="font-medium">1. Administrator account</h2>
+          <input className={input} placeholder="Username" value={f.username} onChange={(e) => set("username", e.target.value)} />
+          <input className={input} placeholder="Email" value={f.email} onChange={(e) => set("email", e.target.value)} />
+          <input className={input} type="password" placeholder="Password (min 8)" value={f.password} onChange={(e) => set("password", e.target.value)} />
+        </>)}
+        {step === 1 && (<>
+          <h2 className="font-medium">2. Microsoft Graph</h2>
+          <input className={input} placeholder="Tenant ID" value={f.tenantId} onChange={(e) => set("tenantId", e.target.value)} />
+          <input className={input} placeholder="Client ID" value={f.clientId} onChange={(e) => set("clientId", e.target.value)} />
+          <input className={input} type="password" placeholder="Client secret" value={f.clientSecret} onChange={(e) => set("clientSecret", e.target.value)} />
+          <input className={input} placeholder="Mailbox (UPN)" value={f.mailboxUpn} onChange={(e) => set("mailboxUpn", e.target.value)} />
+          <button type="button" className="rounded-md border px-3 py-1.5 text-sm" onClick={testGraph}>Test connection</button>
+        </>)}
+        {step === 2 && (<>
+          <h2 className="font-medium">3. Polling</h2>
+          <label className="block text-sm">Check interval (minutes)
+            <input className={input} type="number" min={1} value={f.intervalMinutes} onChange={(e) => set("intervalMinutes", e.target.value)} /></label>
+          <label className="block text-sm">On parse failure
+            <select className={input} value={f.deleteMode} onChange={(e) => set("deleteMode", e.target.value)}>
+              <option value="safe">Move email to DMARC-Errors (safe)</option>
+              <option value="hard">Delete email anyway (hard)</option>
+            </select></label>
+        </>)}
+        {step === 3 && (<>
+          <h2 className="font-medium">4. Email digests (optional)</h2>
+          <input className={input} type="password" placeholder="MailerSend API token" value={f.token} onChange={(e) => set("token", e.target.value)} />
+          <input className={input} placeholder="From address" value={f.from} onChange={(e) => set("from", e.target.value)} />
+          <input className={input} placeholder="Recipients (comma-separated)" value={f.recipients} onChange={(e) => set("recipients", e.target.value)} />
+          <div className="flex gap-2">
+            <input className={input} placeholder="Weekly cron" value={f.weeklyCron} onChange={(e) => set("weeklyCron", e.target.value)} />
+            <input className={input} placeholder="Monthly cron" value={f.monthlyCron} onChange={(e) => set("monthlyCron", e.target.value)} />
+          </div>
+          <button type="button" className="rounded-md border px-3 py-1.5 text-sm" onClick={testEmail}>Send test email</button>
+        </>)}
+        {step === 4 && (<>
+          <h2 className="font-medium">5. GeoIP map (optional)</h2>
+          <input className={input} type="password" placeholder="MaxMind GeoLite2 license key" value={f.maxmind} onChange={(e) => set("maxmind", e.target.value)} />
+        </>)}
+        {msg && <p className="text-sm">{msg}</p>}
+        <div className="flex justify-between pt-2">
+          <button type="button" disabled={step === 0} className="rounded-md border px-3 py-1.5 disabled:opacity-40" onClick={() => { setMsg(""); setStep((s) => s - 1); }}>Back</button>
+          {step < 4
+            ? <button type="button" className="rounded-md bg-primary px-3 py-1.5 text-primary-foreground" onClick={() => { setMsg(""); setStep((s) => s + 1); }}>Next</button>
+            : <button type="button" className="rounded-md bg-primary px-3 py-1.5 text-primary-foreground" onClick={finish}>Finish</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+- [ ] **Step 6: Verify**
+
+Run: `npm run dev`, visit `/` → redirected to `/setup`. Walk the wizard (skip Graph test if no creds yet). On Finish you should be logged in and redirected to the dashboard. Stop the server.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add -A && git commit -m "Add password hashing and session config"
+git add -A && git commit -m "Add first-run setup wizard (API + UI)"
 ```
 
-### Task 7.2: Login/logout routes + page + middleware guard
+### Task 7.3: Login, logout, layout guards, change password
 
-**Files:** Create `src/app/(auth)/login/page.tsx`, `src/app/api/auth/login/route.ts`, `src/app/api/auth/logout/route.ts`, `src/middleware.ts`
+**Files:** Create `src/app/api/auth/login/route.ts`, `src/app/api/auth/logout/route.ts`, `src/app/api/auth/change-password/route.ts`, `src/app/(auth)/layout.tsx`, `src/app/(auth)/login/page.tsx`, `src/app/(auth)/change-password/page.tsx`
 
 - [ ] **Step 1: Implement `src/app/api/auth/login/route.ts`**
 
@@ -1566,17 +2337,17 @@ import { NextResponse } from "next/server";
 import { getIronSession } from "iron-session";
 import { cookies } from "next/headers";
 import { sessionOptions, type SessionData } from "@/lib/auth/session";
-import { verifyPassword } from "@/lib/auth/password";
-import { config } from "@/lib/config";
+import { verifyLogin } from "@/lib/auth/users";
 
 export async function POST(req: Request) {
-  const { user, password } = await req.json();
-  const cfg = config();
-  const ok = user === cfg.adminUser && verifyPassword(password ?? "", cfg.adminPasswordHash);
-  if (!ok) return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
-  const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
-  session.user = user; session.loggedIn = true; await session.save();
-  return NextResponse.json({ ok: true });
+  const { login, password } = await req.json();
+  const user = verifyLogin(login ?? "", password ?? "");
+  if (!user) return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
+  const session = await getIronSession<SessionData>(await cookies(), sessionOptions());
+  session.userId = user.id; session.username = user.username; session.role = user.role;
+  session.loggedIn = true; session.mustChangePassword = user.mustChangePassword;
+  await session.save();
+  return NextResponse.json({ ok: true, mustChangePassword: user.mustChangePassword });
 }
 ```
 
@@ -1589,85 +2360,232 @@ import { cookies } from "next/headers";
 import { sessionOptions, type SessionData } from "@/lib/auth/session";
 
 export async function POST() {
-  const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
+  const session = await getIronSession<SessionData>(await cookies(), sessionOptions());
   session.destroy();
   return NextResponse.json({ ok: true });
 }
 ```
 
-- [ ] **Step 3: Implement `src/app/(auth)/login/page.tsx`**
+- [ ] **Step 3: Implement `src/app/api/auth/change-password/route.ts`**
+
+```ts
+import { NextResponse } from "next/server";
+import { getIronSession } from "iron-session";
+import { cookies } from "next/headers";
+import { sessionOptions, type SessionData } from "@/lib/auth/session";
+import { getUserByLogin, setPassword } from "@/lib/auth/users";
+import { verifyPassword } from "@/lib/auth/password";
+
+export async function POST(req: Request) {
+  const session = await getIronSession<SessionData>(await cookies(), sessionOptions());
+  if (!session.loggedIn || !session.userId) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  const { currentPassword, newPassword } = await req.json();
+  if (!newPassword || newPassword.length < 8) return NextResponse.json({ error: "Password too short" }, { status: 400 });
+  const row = getUserByLogin(session.username!);
+  // Skip current-password check only when a forced change is pending.
+  if (!session.mustChangePassword && !verifyPassword(currentPassword ?? "", row.password_hash))
+    return NextResponse.json({ error: "Current password incorrect" }, { status: 400 });
+  setPassword(session.userId, newPassword);
+  session.mustChangePassword = false; await session.save();
+  return NextResponse.json({ ok: true });
+}
+```
+
+- [ ] **Step 4: Implement `src/app/(auth)/layout.tsx`** (auth pages require setup done)
+
+```tsx
+import { redirect } from "next/navigation";
+import { isSetupComplete } from "@/lib/auth/guard";
+
+export const dynamic = "force-dynamic";
+
+export default function AuthLayout({ children }: { children: React.ReactNode }) {
+  if (!isSetupComplete()) redirect("/setup");
+  return <div className="flex min-h-screen items-center justify-center bg-muted/30">{children}</div>;
+}
+```
+
+- [ ] **Step 5: Implement `src/app/(auth)/login/page.tsx`** (login by username or email + forgot link)
 
 ```tsx
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 export default function LoginPage() {
-  const [user, setUser] = useState("");
+  const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const router = useRouter();
-
   async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setError("");
-    const res = await fetch("/api/auth/login", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user, password }),
-    });
-    if (res.ok) router.push("/");
+    e.preventDefault(); setError("");
+    const res = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ login, password }) });
+    if (res.ok) { const j = await res.json(); router.push(j.mustChangePassword ? "/change-password" : "/"); }
     else setError("Invalid credentials");
   }
-
+  const input = "w-full rounded-md border px-3 py-2";
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background">
-      <form onSubmit={submit} className="w-full max-w-sm space-y-4 rounded-xl border p-8 shadow-sm">
-        <h1 className="text-xl font-semibold">DMARC Dashboard</h1>
-        <input className="w-full rounded-md border px-3 py-2" placeholder="Username"
-          value={user} onChange={(e) => setUser(e.target.value)} />
-        <input className="w-full rounded-md border px-3 py-2" type="password" placeholder="Password"
-          value={password} onChange={(e) => setPassword(e.target.value)} />
-        {error && <p className="text-sm text-red-500">{error}</p>}
-        <button className="w-full rounded-md bg-primary px-3 py-2 text-primary-foreground" type="submit">Sign in</button>
-      </form>
-    </div>
+    <form onSubmit={submit} className="w-full max-w-sm space-y-4 rounded-xl border bg-background p-8 shadow-sm">
+      <h1 className="text-xl font-semibold">DMARC Dashboard</h1>
+      <input className={input} placeholder="Username or email" value={login} onChange={(e) => setLogin(e.target.value)} />
+      <input className={input} type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} />
+      {error && <p className="text-sm text-red-500">{error}</p>}
+      <button className="w-full rounded-md bg-primary px-3 py-2 text-primary-foreground" type="submit">Sign in</button>
+      <Link href="/forgot" className="block text-center text-sm text-muted-foreground hover:underline">Forgot password?</Link>
+    </form>
   );
 }
 ```
 
-- [ ] **Step 4: Implement `src/middleware.ts`** (guard dashboard, allow login + auth API + assets)
+- [ ] **Step 6: Implement `src/app/(auth)/change-password/page.tsx`**
 
-```ts
-import { NextResponse, type NextRequest } from "next/server";
-import { getIronSession } from "iron-session";
-import { sessionOptions, type SessionData } from "@/lib/auth/session";
+A simple client form posting `{ currentPassword, newPassword }` to
+`/api/auth/change-password`, then `router.push("/")` on success. Same input styling as
+login; include a "Current password" field (ignored server-side when a forced change is
+pending) and a "New password" field.
 
-export async function middleware(req: NextRequest) {
-  const res = NextResponse.next();
-  const session = await getIronSession<SessionData>(req, res, sessionOptions as any);
-  const isLogin = req.nextUrl.pathname.startsWith("/login");
-  if (!session.loggedIn && !isLogin) {
-    return NextResponse.redirect(new URL("/login", req.url));
-  }
-  if (session.loggedIn && isLogin) {
-    return NextResponse.redirect(new URL("/", req.url));
-  }
-  return res;
-}
+- [ ] **Step 7: Guard the dashboard** — implemented in Task 9.2's `(dashboard)/layout.tsx`,
+which calls `await requireSetupComplete(); await requireUser();` and passes the role to the
+nav. (No Edge middleware is used.)
 
-export const config = {
-  matcher: ["/((?!api/auth|_next/static|_next/image|favicon.ico).*)"],
-};
-```
+- [ ] **Step 8: Verify**
 
-- [ ] **Step 5: Verify**
+Run: `npm run dev`. Log out (`POST /api/auth/logout` via the nav once built, or clear the
+cookie), visit `/` → `/login`; sign in as the wizard admin → dashboard. Stop the server.
 
-Run: `npm run dev`, visit `/` → redirected to `/login`; sign in with the admin creds (hash generated via `npm run hash:password`); land on dashboard.
-
-- [ ] **Step 6: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add -A && git commit -m "Add admin login/logout and route guard"
+git add -A && git commit -m "Add login/logout, change-password, and auth layout guards"
+```
+
+### Task 7.4: Forgot / reset password (email)
+
+**Files:** Create `src/lib/auth/reset.ts`, `src/app/api/auth/forgot/route.ts`, `src/app/api/auth/reset/route.ts`, `src/app/(auth)/forgot/page.tsx`, `src/app/(auth)/reset/[token]/page.tsx`; Test `tests/reset.test.ts`
+
+- [ ] **Step 1: Write `tests/reset.test.ts`**
+
+```ts
+import { describe, it, expect, afterEach } from "vitest";
+import fs from "node:fs";
+import { migrate } from "@/lib/db/migrate";
+import { closeDb } from "@/lib/db/connection";
+import { createUser } from "@/lib/auth/users";
+import { createReset, consumeReset } from "@/lib/auth/reset";
+import { verifyLogin } from "@/lib/auth/users";
+
+const TMP = "data/test-reset.db";
+afterEach(() => { closeDb(); for (const s of ["","-wal","-shm"]) fs.rmSync(TMP+s,{force:true}); });
+
+describe("password reset", () => {
+  it("issues a single-use token that resets the password", () => {
+    migrate(TMP);
+    const u = createUser({ username: "u", email: "u@x.com", password: "oldpass12", role: "viewer" }, TMP);
+    const token = createReset(u.id, TMP)!;
+    expect(consumeReset(token, "newpass12", TMP)).toBe(true);
+    expect(verifyLogin("u", "newpass12", TMP)?.id).toBe(u.id);
+    // token cannot be reused
+    expect(consumeReset(token, "another12", TMP)).toBe(false);
+  });
+  it("rejects an unknown token", () => {
+    migrate(TMP);
+    expect(consumeReset("deadbeef", "newpass12", TMP)).toBe(false);
+  });
+});
+```
+
+- [ ] **Step 2: Run test, expect FAIL**; Run: `npm test -- tests/reset.test.ts`
+
+- [ ] **Step 3: Implement `src/lib/auth/reset.ts`**
+
+```ts
+import { getDb } from "@/lib/db/connection";
+import { generateResetToken, hashToken } from "./tokens";
+import { setPassword } from "./users";
+
+const TTL = 3600; // 1 hour
+
+export function createReset(userId: number, dbPath?: string): string | null {
+  const { token, tokenHash } = generateResetToken();
+  const now = Math.floor(Date.now() / 1000);
+  getDb(dbPath).prepare(
+    `INSERT INTO password_reset (user_id,token_hash,expires_at) VALUES (?,?,?)`
+  ).run(userId, tokenHash, now + TTL);
+  return token;
+}
+
+export function consumeReset(token: string, newPassword: string, dbPath?: string): boolean {
+  const db = getDb(dbPath);
+  const now = Math.floor(Date.now() / 1000);
+  const row = db.prepare(
+    `SELECT * FROM password_reset WHERE token_hash=? AND used_at IS NULL AND expires_at > ?`
+  ).get(hashToken(token), now) as any;
+  if (!row) return false;
+  setPassword(row.user_id, newPassword, dbPath);
+  db.prepare(`UPDATE password_reset SET used_at=? WHERE id=?`).run(now, row.id);
+  return true;
+}
+```
+
+- [ ] **Step 4: Run test, expect PASS** (2 tests)
+
+- [ ] **Step 5: Implement `src/app/api/auth/forgot/route.ts`** (does not leak which emails exist)
+
+```ts
+import { NextResponse } from "next/server";
+import { getUserByEmail } from "@/lib/auth/users";
+import { createReset } from "@/lib/auth/reset";
+import { getSetting } from "@/lib/settings";
+import { sendEmail } from "@/lib/email/mailersend";
+
+export async function POST(req: Request) {
+  const { email } = await req.json();
+  const token = getSetting<string>("mailersend_token");
+  if (!token) return NextResponse.json({ ok: false, emailConfigured: false });
+  const user = getUserByEmail(email ?? "");
+  if (user && user.isActive) {
+    const resetToken = createReset(user.id);
+    const base = req.headers.get("origin") ?? "";
+    await sendEmail({
+      token, from: getSetting<string>("mailersend_from"), fromName: "DMARC Dashboard",
+      to: [user.email], subject: "Reset your DMARC Dashboard password",
+      html: `<p>Reset your password: <a href="${base}/reset/${resetToken}">${base}/reset/${resetToken}</a></p><p>This link expires in 1 hour.</p>`,
+    }).catch(() => {});
+  }
+  return NextResponse.json({ ok: true, emailConfigured: true });
+}
+```
+
+- [ ] **Step 6: Implement `src/app/api/auth/reset/route.ts`**
+
+```ts
+import { NextResponse } from "next/server";
+import { consumeReset } from "@/lib/auth/reset";
+
+export async function POST(req: Request) {
+  const { token, password } = await req.json();
+  if (!password || password.length < 8) return NextResponse.json({ error: "Password too short" }, { status: 400 });
+  const ok = consumeReset(token ?? "", password);
+  if (!ok) return NextResponse.json({ error: "Invalid or expired link" }, { status: 400 });
+  return NextResponse.json({ ok: true });
+}
+```
+
+- [ ] **Step 7: Implement the two pages**
+
+`src/app/(auth)/forgot/page.tsx`: client form posting `{ email }` to `/api/auth/forgot`;
+always shows "If that email exists, a reset link has been sent." On
+`emailConfigured === false`, show "Email isn't configured; ask an administrator to reset
+your password." `src/app/(auth)/reset/[token]/page.tsx`: reads the `token` route param,
+posts `{ token, password }` to `/api/auth/reset`, on success links back to `/login`. Reuse
+the login page's input styling.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add -A && git commit -m "Add forgot/reset password flow via MailerSend"
 ```
 
 ---
@@ -1880,7 +2798,7 @@ git add -A && git commit -m "Add dashboard aggregate query layer"
 
 ```bash
 npx shadcn@latest init -d
-npx shadcn@latest add card table badge button select tabs
+npx shadcn@latest add card table badge button select tabs input label
 ```
 
 - [ ] **Step 2: Commit**
@@ -1898,14 +2816,19 @@ git add -A && git commit -m "Add shadcn ui primitives"
 ```tsx
 import Link from "next/link";
 import { Nav } from "@/components/nav";
+import { requireSetupComplete, requireUser } from "@/lib/auth/guard";
 
-export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+export const dynamic = "force-dynamic";
+
+export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
+  await requireSetupComplete();          // redirects to /setup if not configured
+  const session = await requireUser();   // redirects to /login if not signed in
   return (
     <div className="min-h-screen bg-muted/30">
       <header className="border-b bg-background">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-3">
           <Link href="/" className="font-semibold">DMARC Dashboard</Link>
-          <Nav />
+          <Nav role={session.role!} username={session.username} />
         </div>
       </header>
       <main className="mx-auto max-w-7xl px-6 py-6">{children}</main>
@@ -1914,14 +2837,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 }
 ```
 
-- [ ] **Step 2: Implement `src/components/nav.tsx`**
+- [ ] **Step 2: Implement `src/components/nav.tsx`** (admin-only Settings/Users links)
 
 ```tsx
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import type { Role } from "@/lib/auth/session";
 
-const links = [
+const baseLinks = [
   { href: "/", label: "Overview" },
   { href: "/sources", label: "Sources" },
   { href: "/authentication", label: "Authentication" },
@@ -1929,22 +2853,27 @@ const links = [
   { href: "/reports", label: "Reports" },
   { href: "/ingest-log", label: "Ingest Log" },
 ];
+const adminLinks = [
+  { href: "/settings", label: "Settings" },
+  { href: "/users", label: "Users" },
+];
 
-export function Nav() {
+export function Nav({ role, username }: { role: Role; username?: string }) {
   const path = usePathname();
+  const links = role === "admin" ? [...baseLinks, ...adminLinks] : baseLinks;
   return (
-    <nav className="flex gap-1 text-sm">
+    <nav className="flex items-center gap-1 text-sm">
       {links.map((l) => (
         <Link key={l.href} href={l.href}
           className={`rounded-md px-3 py-1.5 ${path === l.href ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}>
           {l.label}
         </Link>
       ))}
-      <form action="/api/auth/logout" method="post" onSubmit={(e) => {
-        e.preventDefault(); fetch("/api/auth/logout", { method: "POST" }).then(() => location.assign("/login"));
-      }}>
-        <button className="rounded-md px-3 py-1.5 hover:bg-muted" type="submit">Sign out</button>
-      </form>
+      <span className="ml-2 text-xs text-muted-foreground">{username} ({role})</span>
+      <button className="rounded-md px-3 py-1.5 hover:bg-muted" type="button"
+        onClick={() => fetch("/api/auth/logout", { method: "POST" }).then(() => location.assign("/login"))}>
+        Sign out
+      </button>
     </nav>
   );
 }
@@ -2056,7 +2985,7 @@ export function VolumeChart({ data }: { data: { day: string; pass: number; fail:
 - [ ] **Step 3: Implement `src/app/(dashboard)/page.tsx`** (Server Component)
 
 ```tsx
-import { config } from "@/lib/config";
+import { bootstrap } from "@/lib/config";
 import { overviewKpis, volumeByDay, listDomains } from "@/lib/db/queries";
 import { parseFilters } from "@/lib/filters";
 import { KpiCard } from "@/components/kpi-card";
@@ -2067,7 +2996,7 @@ export const dynamic = "force-dynamic";
 
 export default async function OverviewPage({ searchParams }: { searchParams: Promise<Record<string, string>> }) {
   const sp = await searchParams;
-  const dbPath = config().dbPath;
+  const dbPath = bootstrap().dbPath;
   const f = parseFilters(sp);
   const k = overviewKpis(dbPath, f);
   const volume = volumeByDay(dbPath, f);
@@ -2113,8 +3042,8 @@ git add -A && git commit -m "Add overview page with KPI cards and volume chart"
 
 ```ts
 import maxmind, { type CityResponse, type Reader } from "maxmind";
-import path from "node:path";
 import fs from "node:fs";
+import { bootstrap } from "@/lib/config";
 
 let reader: Reader<CityResponse> | null = null;
 let attempted = false;
@@ -2122,7 +3051,7 @@ let attempted = false;
 async function getReader(): Promise<Reader<CityResponse> | null> {
   if (attempted) return reader;
   attempted = true;
-  const p = path.join(process.cwd(), "data", "GeoLite2-City.mmdb");
+  const p = bootstrap().geoPath;
   if (!fs.existsSync(p)) return null;
   reader = await maxmind.open<CityResponse>(p);
   return reader;
@@ -2215,7 +3144,7 @@ export function GeoMap({ points }: { points: { lat: number; lon: number; message
 - [ ] **Step 5: Implement `src/app/(dashboard)/sources/page.tsx`** (Server Component, enriches top sources with geo)
 
 ```tsx
-import { config } from "@/lib/config";
+import { bootstrap } from "@/lib/config";
 import { topSources, listDomains } from "@/lib/db/queries";
 import { parseFilters } from "@/lib/filters";
 import { locate } from "@/lib/geo/geoip";
@@ -2227,7 +3156,7 @@ export const dynamic = "force-dynamic";
 
 export default async function SourcesPage({ searchParams }: { searchParams: Promise<Record<string, string>> }) {
   const sp = await searchParams;
-  const dbPath = config().dbPath;
+  const dbPath = bootstrap().dbPath;
   const f = parseFilters(sp);
   const sources = topSources(dbPath, f, 100);
   const domains = listDomains(dbPath);
@@ -2290,7 +3219,7 @@ export function BreakdownBar({ rows }: { rows: { label: string; value: number }[
 - [ ] **Step 2: Implement `src/app/(dashboard)/authentication/page.tsx`**
 
 ```tsx
-import { config } from "@/lib/config";
+import { bootstrap } from "@/lib/config";
 import { authQuadrant, listDomains } from "@/lib/db/queries";
 import { parseFilters } from "@/lib/filters";
 import { KpiCard } from "@/components/kpi-card";
@@ -2300,7 +3229,7 @@ export const dynamic = "force-dynamic";
 
 export default async function AuthPage({ searchParams }: { searchParams: Promise<Record<string, string>> }) {
   const sp = await searchParams;
-  const dbPath = config().dbPath;
+  const dbPath = bootstrap().dbPath;
   const q = authQuadrant(dbPath, parseFilters(sp));
   const domains = listDomains(dbPath);
   return (
@@ -2320,7 +3249,7 @@ export default async function AuthPage({ searchParams }: { searchParams: Promise
 - [ ] **Step 3: Implement `src/app/(dashboard)/policy/page.tsx`**
 
 ```tsx
-import { config } from "@/lib/config";
+import { bootstrap } from "@/lib/config";
 import { dispositionBreakdown, listDomains } from "@/lib/db/queries";
 import { parseFilters } from "@/lib/filters";
 import { BreakdownBar } from "@/components/breakdown-bar";
@@ -2330,7 +3259,7 @@ export const dynamic = "force-dynamic";
 
 export default async function PolicyPage({ searchParams }: { searchParams: Promise<Record<string, string>> }) {
   const sp = await searchParams;
-  const dbPath = config().dbPath;
+  const dbPath = bootstrap().dbPath;
   const d = dispositionBreakdown(dbPath, parseFilters(sp));
   const domains = listDomains(dbPath);
   return (
@@ -2349,14 +3278,14 @@ export default async function PolicyPage({ searchParams }: { searchParams: Promi
 
 ```tsx
 import Link from "next/link";
-import { config } from "@/lib/config";
+import { bootstrap } from "@/lib/config";
 import { recentReports } from "@/lib/db/queries";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 export const dynamic = "force-dynamic";
 
 export default async function ReportsPage() {
-  const rows = recentReports(config().dbPath, 200);
+  const rows = recentReports(bootstrap().dbPath, 200);
   return (
     <div className="rounded-xl border bg-background p-4">
       <h2 className="mb-4 text-sm font-medium">Recent reports</h2>
@@ -2384,7 +3313,7 @@ export default async function ReportsPage() {
 - [ ] **Step 5: Implement `src/app/(dashboard)/reports/[id]/page.tsx`**
 
 ```tsx
-import { config } from "@/lib/config";
+import { bootstrap } from "@/lib/config";
 import { reportDetail } from "@/lib/db/queries";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
@@ -2392,7 +3321,7 @@ export const dynamic = "force-dynamic";
 
 export default async function ReportDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { report, policy, records } = reportDetail(config().dbPath, Number(id));
+  const { report, policy, records } = reportDetail(bootstrap().dbPath, Number(id));
   if (!report) return <div>Report not found.</div>;
   return (
     <div className="space-y-6">
@@ -2428,7 +3357,7 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
 - [ ] **Step 6: Implement `src/app/(dashboard)/ingest-log/page.tsx`**
 
 ```tsx
-import { config } from "@/lib/config";
+import { bootstrap } from "@/lib/config";
 import { ingestLog, droppedFieldsSummary } from "@/lib/db/queries";
 import { BreakdownBar } from "@/components/breakdown-bar";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -2436,7 +3365,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 export const dynamic = "force-dynamic";
 
 export default async function IngestLogPage() {
-  const dbPath = config().dbPath;
+  const dbPath = bootstrap().dbPath;
   const log = ingestLog(dbPath, 200);
   const dropped = droppedFieldsSummary(dbPath);
   return (
@@ -2482,6 +3411,226 @@ git add -A && git commit -m "Add authentication, policy, reports, and ingest-log
 ```
 
 ---
+
+## Milestone 9.5b: Settings & User management (admin only)
+
+> Everything the wizard set is editable here. The Settings save re-applies the scheduler
+> live. Both areas are admin-only — enforced in the page (server guard) and in the API
+> route (role check returns 403).
+
+### Task S.1: Settings API + page
+
+**Files:** Create `src/app/api/settings/route.ts`, `src/app/(dashboard)/settings/page.tsx`, `src/components/settings-form.tsx`
+
+- [ ] **Step 1: Implement `src/app/api/settings/route.ts`** (admin-guarded; masks secrets)
+
+```ts
+import { NextResponse } from "next/server";
+import { getSession } from "@/lib/auth/guard";
+import { getSettings, setSettings, SETTING_DEFS } from "@/lib/settings";
+import { applySettingsChange } from "@/lib/scheduler";
+
+const MASK = "********";
+const SECRET_KEYS = Object.entries(SETTING_DEFS).filter(([, d]) => d.type === "secret").map(([k]) => k);
+
+async function ensureAdmin() {
+  const s = await getSession();
+  return s.loggedIn && s.role === "admin";
+}
+
+export async function GET() {
+  if (!(await ensureAdmin())) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  const all = getSettings();
+  // Never send secret values to the browser — send a mask sentinel if a value is set.
+  for (const k of SECRET_KEYS) all[k] = all[k] ? MASK : "";
+  return NextResponse.json(all);
+}
+
+export async function POST(req: Request) {
+  if (!(await ensureAdmin())) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  const body = await req.json();
+  const update: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(body)) {
+    if (!(k in SETTING_DEFS) || k === "setup_complete") continue;
+    // Skip masked secrets so an unchanged field doesn't overwrite the stored secret.
+    if (SECRET_KEYS.includes(k) && (v === MASK || v === "")) continue;
+    update[k] = v;
+  }
+  setSettings(update);
+  applySettingsChange();   // live re-schedule poll + digests
+  return NextResponse.json({ ok: true });
+}
+```
+
+- [ ] **Step 2: Implement `src/app/(dashboard)/settings/page.tsx`** (admin guard + form)
+
+```tsx
+import { requireRole } from "@/lib/auth/guard";
+import { SettingsForm } from "@/components/settings-form";
+
+export const dynamic = "force-dynamic";
+
+export default async function SettingsPage() {
+  await requireRole("admin");
+  return (
+    <div className="max-w-2xl">
+      <h1 className="mb-4 text-xl font-semibold">Settings</h1>
+      <SettingsForm />
+    </div>
+  );
+}
+```
+
+- [ ] **Step 3: Implement `src/components/settings-form.tsx`**
+
+A client component that on mount `GET`s `/api/settings`, fills controlled inputs (secret
+fields show the `********` mask when set; leaving them masked keeps the stored value),
+and on Save `POST`s the object back. Group fields: Microsoft Graph (tenant/client/secret/
+mailbox), Polling (`poll_interval_minutes` number, `delete_mode` select), Email
+(`mailersend_token` secret, `mailersend_from`, `digest_recipients` as comma-separated,
+`digest_weekly_cron`, `digest_monthly_cron`), GeoIP (`maxmind_license_key` secret).
+Convert `digest_recipients` between the array (API) and a comma string (input). Show a
+"Saved" toast on success. Reuse the input styling from the wizard.
+
+- [ ] **Step 4: Verify**
+
+Run: `npm run dev`, sign in as admin, open `/settings`, change the poll interval, Save →
+server log shows `[scheduler] poll scheduled` with the new interval. As a non-admin the
+nav hides the link and visiting `/settings` redirects to `/`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add -A && git commit -m "Add admin Settings API and page with live re-scheduling"
+```
+
+### Task S.2: User management API + page
+
+**Files:** Create `src/app/api/users/route.ts`, `src/app/api/users/[id]/route.ts`, `src/app/(dashboard)/users/page.tsx`, `src/components/users-admin.tsx`; Test `tests/users-guard.test.ts`
+
+- [ ] **Step 1: Write `tests/users-guard.test.ts`** (last-admin protection logic)
+
+```ts
+import { describe, it, expect, afterEach } from "vitest";
+import fs from "node:fs";
+import { migrate } from "@/lib/db/migrate";
+import { closeDb } from "@/lib/db/connection";
+import { createUser, countAdmins } from "@/lib/auth/users";
+import { canRemoveAdmin } from "@/lib/auth/users-guard";
+
+const TMP = "data/test-uguard.db";
+afterEach(() => { closeDb(); for (const s of ["","-wal","-shm"]) fs.rmSync(TMP+s,{force:true}); });
+
+describe("last-admin protection", () => {
+  it("blocks removing/demoting the only admin", () => {
+    migrate(TMP);
+    const a = createUser({ username: "a", email: "a@x.com", password: "pw123456", role: "admin" }, TMP);
+    expect(canRemoveAdmin(a.id, TMP)).toBe(false);
+    createUser({ username: "b", email: "b@x.com", password: "pw123456", role: "admin" }, TMP);
+    expect(canRemoveAdmin(a.id, TMP)).toBe(true);
+    expect(countAdmins(TMP)).toBe(2);
+  });
+});
+```
+
+- [ ] **Step 2: Implement `src/lib/auth/users-guard.ts`**
+
+```ts
+import { getUserById, countAdmins } from "./users";
+
+// True if this user can be demoted/deactivated/deleted without losing the last admin.
+export function canRemoveAdmin(userId: number, dbPath?: string): boolean {
+  const u = getUserById(userId, dbPath);
+  if (!u || u.role !== "admin") return true;
+  return countAdmins(dbPath) > 1;
+}
+```
+
+- [ ] **Step 3: Run test, expect PASS**; Run: `npm test -- tests/users-guard.test.ts`
+
+- [ ] **Step 4: Implement `src/app/api/users/route.ts`** (list + create, admin only)
+
+```ts
+import { NextResponse } from "next/server";
+import { getSession } from "@/lib/auth/guard";
+import { listUsers, createUser } from "@/lib/auth/users";
+
+async function ensureAdmin() { const s = await getSession(); return s.loggedIn && s.role === "admin"; }
+
+export async function GET() {
+  if (!(await ensureAdmin())) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  return NextResponse.json(listUsers());
+}
+
+export async function POST(req: Request) {
+  if (!(await ensureAdmin())) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  const { username, email, password, role } = await req.json();
+  if (!username || !email || !password || password.length < 8 || !["admin","analyst","viewer"].includes(role))
+    return NextResponse.json({ error: "Invalid input" }, { status: 400 });
+  try {
+    const u = createUser({ username, email, password, role, mustChangePassword: true });
+    return NextResponse.json(u);
+  } catch (e: any) {
+    return NextResponse.json({ error: "Username or email already exists" }, { status: 409 });
+  }
+}
+```
+
+- [ ] **Step 5: Implement `src/app/api/users/[id]/route.ts`** (update role/active/email, set password, delete; protects last admin)
+
+```ts
+import { NextResponse } from "next/server";
+import { getSession } from "@/lib/auth/guard";
+import { updateUser, setPassword, deleteUser, getUserById } from "@/lib/auth/users";
+import { canRemoveAdmin } from "@/lib/auth/users-guard";
+
+async function ensureAdmin() { const s = await getSession(); return s.loggedIn && s.role === "admin"; }
+
+export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  if (!(await ensureAdmin())) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  const id = Number((await params).id);
+  const body = await req.json();
+  const target = getUserById(id);
+  if (!target) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const demoting = body.role && body.role !== "admin" && target.role === "admin";
+  const deactivating = body.isActive === false && target.role === "admin";
+  if ((demoting || deactivating) && !canRemoveAdmin(id))
+    return NextResponse.json({ error: "Cannot remove the last administrator" }, { status: 400 });
+  if (body.password) { if (body.password.length < 8) return NextResponse.json({ error: "Password too short" }, { status: 400 }); setPassword(id, body.password); }
+  updateUser(id, { role: body.role, isActive: body.isActive, email: body.email });
+  return NextResponse.json({ ok: true });
+}
+
+export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  if (!(await ensureAdmin())) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  const id = Number((await params).id);
+  if (!canRemoveAdmin(id)) return NextResponse.json({ error: "Cannot delete the last administrator" }, { status: 400 });
+  deleteUser(id);
+  return NextResponse.json({ ok: true });
+}
+```
+
+- [ ] **Step 6: Implement `src/app/(dashboard)/users/page.tsx` + `src/components/users-admin.tsx`**
+
+Page: `await requireRole("admin")` then render `<UsersAdmin />`. `UsersAdmin` is a client
+component that `GET`s `/api/users`, shows a table (username, email, role, active,
+must-change), an "Add user" form (username, email, temp password, role select — created
+with `must_change_password`), a per-row role `Select` (PATCH), an activate/deactivate
+toggle (PATCH `isActive`), a "Reset password" action (PATCH `password`), and a Delete
+button (DELETE). Surface the "last administrator" 400 errors inline. Reuse shadcn `Table`,
+`Select`, `Button`, `Input`.
+
+- [ ] **Step 7: Verify**
+
+Run: `npm run dev`, as admin open `/users`, add an analyst and a viewer, toggle roles, try
+to delete/demote the only admin (should be blocked), reset a password. Sign in as the new
+analyst → no Settings/Users links, `/settings` redirects to `/`.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add -A && git commit -m "Add admin user management (API + page) with last-admin guard"
+```
 
 ## Milestone 9.6: Email digests (MailerSend)
 
@@ -2544,83 +3693,11 @@ Run: `npm test -- tests/queries.test.ts`  Expected: PASS.
 git add -A && git commit -m "Add digest summary query"
 ```
 
-### Task D.2: MailerSend client
+### Task D.2: MailerSend client — already built
 
-**Files:** Create `src/lib/email/mailersend.ts`; Test `tests/mailersend.test.ts`
-
-- [ ] **Step 1: Write the failing test (mock fetch, assert request shape)**
-
-```ts
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { sendEmail } from "@/lib/email/mailersend";
-
-describe("sendEmail", () => {
-  beforeEach(() => { vi.restoreAllMocks(); });
-  it("POSTs to MailerSend with auth header and recipients", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 202, text: async () => "" });
-    vi.stubGlobal("fetch", fetchMock);
-    await sendEmail({
-      token: "tok", from: "dmarc@beaconspec.com", fromName: "DMARC",
-      to: ["a@x.com", "b@x.com"], subject: "Weekly", html: "<p>hi</p>",
-    });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("https://api.mailersend.com/v1/email");
-    expect((init.headers as any).Authorization).toBe("Bearer tok");
-    const body = JSON.parse(init.body);
-    expect(body.to).toEqual([{ email: "a@x.com" }, { email: "b@x.com" }]);
-    expect(body.subject).toBe("Weekly");
-  });
-
-  it("throws on non-2xx", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 422, text: async () => "bad" }));
-    await expect(sendEmail({ token: "t", from: "f@x.com", to: ["a@x.com"], subject: "s", html: "h" }))
-      .rejects.toThrow(/422/);
-  });
-});
-```
-
-- [ ] **Step 2: Run test, expect FAIL**
-
-Run: `npm test -- tests/mailersend.test.ts`  Expected: FAIL.
-
-- [ ] **Step 3: Implement `src/lib/email/mailersend.ts`**
-
-```ts
-export interface SendEmailOpts {
-  token: string; from: string; fromName?: string;
-  to: string[]; subject: string; html: string; text?: string;
-}
-
-export async function sendEmail(o: SendEmailOpts): Promise<void> {
-  const res = await fetch("https://api.mailersend.com/v1/email", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${o.token}`,
-      "Content-Type": "application/json",
-      "X-Requested-With": "XMLHttpRequest",
-    },
-    body: JSON.stringify({
-      from: { email: o.from, name: o.fromName ?? "DMARC Dashboard" },
-      to: o.to.map((email) => ({ email })),
-      subject: o.subject,
-      html: o.html,
-      text: o.text ?? o.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(),
-    }),
-  });
-  if (!res.ok) throw new Error(`MailerSend send failed: ${res.status} ${await res.text()}`);
-}
-```
-
-- [ ] **Step 4: Run test, expect PASS**
-
-Run: `npm test -- tests/mailersend.test.ts`  Expected: PASS (2 tests).
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add -A && git commit -m "Add MailerSend email client"
-```
+The MailerSend client (`src/lib/email/mailersend.ts`) is built earlier in **Task 6.5**
+(it's a dependency of the setup wizard and forgot-password). Nothing to do here; `sendEmail`
+is ready to import.
 
 ### Task D.3: Digest builder (HTML) + runner
 
@@ -2722,24 +3799,26 @@ Run: `npm test -- tests/digest.test.ts`  Expected: PASS.
 - [ ] **Step 5: Implement `src/lib/email/send-digest.ts`** (window math + send)
 
 ```ts
-import { config } from "@/lib/config";
+import { getSetting } from "@/lib/settings";
 import { buildDigestHtml } from "./digest";
 import { sendEmail } from "./mailersend";
 
 const DAY = 86400;
 
 export async function sendDigest(period: "weekly" | "monthly", now: number): Promise<void> {
-  const cfg = config();
-  if (!cfg.mailersendToken) { console.warn("[digest] MAILERSEND_API_TOKEN not set; skipping"); return; }
+  const token = getSetting<string>("mailersend_token");
+  if (!token) { console.warn("[digest] mailersend_token not set; skipping"); return; }
+  const recipients = getSetting<string[]>("digest_recipients");
+  if (!recipients.length) { console.warn("[digest] no recipients configured; skipping"); return; }
   const span = period === "weekly" ? 7 * DAY : 30 * DAY;
   const from = now - span;
   const prevWindowStart = now - 2 * span;
-  const { subject, html } = buildDigestHtml(cfg.dbPath, period, { from, to: now }, prevWindowStart);
+  const { subject, html } = buildDigestHtml(undefined, period, { from, to: now }, prevWindowStart);
   await sendEmail({
-    token: cfg.mailersendToken, from: cfg.mailersendFrom, fromName: "DMARC Dashboard",
-    to: cfg.digestRecipients, subject, html,
+    token, from: getSetting<string>("mailersend_from"), fromName: "DMARC Dashboard",
+    to: recipients, subject, html,
   });
-  console.log(`[digest] sent ${period} digest to ${cfg.digestRecipients.join(", ")}`);
+  console.log(`[digest] sent ${period} digest to ${recipients.join(", ")}`);
 }
 ```
 
@@ -2768,28 +3847,38 @@ git add -A && git commit -m "Add digest HTML builder and send runner"
 
 **Files:** Modify `src/lib/scheduler.ts`
 
-- [ ] **Step 1: Add digest cron jobs to `startScheduler()` in `src/lib/scheduler.ts`**
+- [ ] **Step 1: Flesh out `rescheduleDigests()` in `src/lib/scheduler.ts`**
 
-Add this import at the top:
+Add this import at the top of `src/lib/scheduler.ts`:
 ```ts
 import { sendDigest } from "@/lib/email/send-digest";
 ```
-Then inside `startScheduler()`, after the existing `cron.schedule(cfg.pollCron, ...)` line, add:
+Replace the stub `rescheduleDigests()` body (from Task 6.1) with:
 ```ts
-  if (cfg.mailersendToken) {
-    if (cron.validate(cfg.digestWeeklyCron))
-      cron.schedule(cfg.digestWeeklyCron, () => { void sendDigest("weekly", Math.floor(Date.now() / 1000)); });
-    if (cron.validate(cfg.digestMonthlyCron))
-      cron.schedule(cfg.digestMonthlyCron, () => { void sendDigest("monthly", Math.floor(Date.now() / 1000)); });
-    console.log(`[scheduler] digests scheduled (weekly "${cfg.digestWeeklyCron}", monthly "${cfg.digestMonthlyCron}")`);
-  } else {
-    console.log("[scheduler] MAILERSEND_API_TOKEN not set; digests disabled");
+export function rescheduleDigests() {
+  weeklyTask?.stop(); monthlyTask?.stop();
+  weeklyTask = null; monthlyTask = null;
+  if (!getSetting<boolean>("setup_complete")) return;
+  if (!getSetting<string>("mailersend_token")) {
+    console.log("[scheduler] mailersend_token not set; digests disabled");
+    return;
   }
+  const weekly = getSetting<string>("digest_weekly_cron");
+  const monthly = getSetting<string>("digest_monthly_cron");
+  if (cron.validate(weekly))
+    weeklyTask = cron.schedule(weekly, () => { void sendDigest("weekly", Math.floor(Date.now() / 1000)); });
+  if (cron.validate(monthly))
+    monthlyTask = cron.schedule(monthly, () => { void sendDigest("monthly", Math.floor(Date.now() / 1000)); });
+  console.log(`[scheduler] digests scheduled (weekly "${weekly}", monthly "${monthly}")`);
+}
 ```
+
+(`applySettingsChange()` is already defined in Task 6.1 and now picks up these digest
+schedules too, since it calls `rescheduleDigests()`.)
 
 - [ ] **Step 2: Verify boot**
 
-Run: `npm run dev`  Expected: logs show digest schedule lines when the token is set. Stop the server.
+Run: `npm run dev`  Expected: with no settings, logs show `[scheduler] started` and digests disabled. Stop the server.
 
 - [ ] **Step 3: Commit**
 
@@ -2841,16 +3930,17 @@ Test-ApplicationAccessPolicy -Identity dmarc@yourdomain.com -AppId <CLIENT_ID>  
 Test-ApplicationAccessPolicy -Identity someoneelse@yourdomain.com -AppId <CLIENT_ID>  # Denied
 ```
 
-## 5. Fill `.env`
-Copy `.env.example` to `.env`, fill TENANT_ID/CLIENT_ID/CLIENT_SECRET/MAILBOX_UPN.
-Generate the admin password hash: `npm run hash:password 'your-password'` → ADMIN_PASSWORD_HASH.
-Generate a session secret: any 32+ char random string → SESSION_SECRET.
-For digests, copy the MailerSend token from `C:/Users/DavidSoden/registry/email_access_token.txt`
-into MAILERSEND_API_TOKEN, set MAILERSEND_FROM to a verified MailerSend sender domain, and
-adjust DIGEST_RECIPIENTS if needed (defaults: david.soden@ and duane.walker@beaconspec.com).
+## 5. Enter everything in the Setup Wizard (no .env)
+Start the app and open it in a browser — first run redirects to the **Setup Wizard**.
+Enter: admin account; Graph TENANT_ID/CLIENT_ID/CLIENT_SECRET and the mailbox UPN (use
+"Test connection"); poll interval + delete mode; and (optional) the MailerSend token from
+`C:/Users/DavidSoden/registry/email_access_token.txt`, a verified MailerSend from-address,
+digest recipients (default david.soden@ and duane.walker@beaconspec.com), and the MaxMind
+key. All values are stored encrypted in the DB; no env file of secrets is used.
 
 ## 6. Smoke test
-`npm run poll:once` → should print a poll result and create rows in `data/dmarc.db`.
+After finishing the wizard, `npm run poll:once` should print a poll result and create rows
+in the DB. (It reads Graph creds from the saved settings.)
 ```
 
 - [ ] **Step 2: Commit**
@@ -2898,7 +3988,7 @@ const outPath = path.join(process.cwd(), "data", "GeoLite2-City.mmdb");
 
 (Note: prefer the simpler buffered implementation below — replace the streaming body handling with: read the whole response into a Buffer, `zlib.gunzipSync`, then feed to `tar-stream`'s extract via a `Readable.from(buffer)`. Install deps: `npm i tar-stream && npm i -D @types/tar-stream`.)
 
-Concrete working version:
+Concrete working version (reads the MaxMind key from settings, then env as a fallback):
 ```ts
 import "dotenv/config";
 import fs from "node:fs";
@@ -2906,11 +3996,15 @@ import path from "node:path";
 import zlib from "node:zlib";
 import { Readable } from "node:stream";
 import extract from "tar-stream/extract";
+import { migrate } from "@/lib/db/migrate";
+import { getSetting } from "@/lib/settings";
+import { bootstrap } from "@/lib/config";
 
-const key = process.env.MAXMIND_LICENSE_KEY;
-if (!key) { console.error("Set MAXMIND_LICENSE_KEY first."); process.exit(1); }
+migrate();
+const key = getSetting<string>("maxmind_license_key") || process.env.MAXMIND_LICENSE_KEY;
+if (!key) { console.error("Set the MaxMind key in the Setup Wizard/Settings, or MAXMIND_LICENSE_KEY env."); process.exit(1); }
 const url = `https://download.maxmind.com/app/geoip_download?edition_id=GeoLite2-City&license_key=${key}&suffix=tar.gz`;
-const outPath = path.join(process.cwd(), "data", "GeoLite2-City.mmdb");
+const outPath = bootstrap().geoPath;
 
 (async () => {
   const res = await fetch(url);
@@ -3000,11 +4094,16 @@ services:
     build: .
     ports:
       - "3000:3000"
-    env_file: .env
+    environment:
+      DATA_DIR: /app/data
+      # PORT optional; defaults to 3000
     volumes:
-      - ./data:/app/data
+      - ./data:/app/data      # holds dmarc.db, GeoLite2-City.mmdb, app.key
     restart: unless-stopped
 ```
+
+No `.env` of secrets is needed — all config is entered in the in-app Setup Wizard on first
+run and stored (encrypted) in the DB on the mounted volume.
 
 - [ ] **Step 5: Build and run**
 
@@ -3013,7 +4112,9 @@ Run:
 docker compose build
 docker compose up -d
 ```
-Expected: container starts, logs show `[scheduler] started`; visit `http://localhost:3000` → login.
+Expected: container starts, logs show `[scheduler] started`; visit `http://localhost:3000`
+→ redirected to the **Setup Wizard** (first run). After finishing the wizard you land on
+the dashboard.
 
 - [ ] **Step 6: Commit**
 
@@ -3025,7 +4126,7 @@ git add -A && git commit -m "Add Docker packaging and compose"
 
 **Files:** Create `README.md`
 
-- [ ] **Step 1: Write `README.md`** covering: what it does, a short feature comparison vs. Postmark DMARC Digests Premium (we match all-sources + dashboard, exceed on retention, add geo map + digests), the Entra setup pointer (`docs/SETUP-ENTRA.md`), env vars, `npm run hash:password`, `npm run fetch:geo`, `npm run digest -- weekly|monthly`, `docker compose up`, the 15-min poll, weekly/monthly digests, and the safe-delete behavior + `DMARC-Errors` folder.
+- [ ] **Step 1: Write `README.md`** covering: what it does, a short feature comparison vs. Postmark DMARC Digests Premium (we match all-sources + dashboard, exceed on retention, add geo map + digests + multi-user), the **Setup Wizard first-run flow** (no env config; admin created in the wizard), the Entra setup pointer (`docs/SETUP-ENTRA.md`), the only env vars (`DATA_DIR`, `PORT`), roles (admin/analyst/viewer), forgot-password, `npm run fetch:geo`, `npm run digest -- weekly|monthly`, `docker compose up`, the configurable poll interval, weekly/monthly digests, and the safe-delete behavior + `DMARC-Errors` folder. Note that secrets are encrypted at rest with `data/app.key` (back this file up; losing it means re-entering secrets).
 
 - [ ] **Step 2: Commit**
 
@@ -3047,16 +4148,42 @@ Run: `npx tsc --noEmit && npm run build`  Expected: no errors.
 
 - [ ] **End-to-end (manual, requires real mailbox + Entra)**
 
-1. `npm run fetch:geo` (optional map data).
-2. `npm run poll:once` → reports ingested, emails deleted (or moved to `DMARC-Errors` on parse failure).
-3. `npm run digest -- weekly` → confirm both recipients receive the digest email.
-4. `docker compose up -d` → dashboard at `http://localhost:3000`, all pages populated; scheduler logs show poll + digest crons.
+1. `docker compose up -d` → open `http://localhost:3000` → complete the **Setup Wizard**
+   (admin account, Graph creds with Test connection, poll interval, email, MaxMind).
+2. `npm run fetch:geo` (optional map data; reads the MaxMind key from settings).
+3. `npm run poll:once` → reports ingested, emails deleted (or moved to `DMARC-Errors` on parse failure).
+4. `npm run digest -- weekly` → confirm both recipients receive the digest email.
+5. In the app: change the poll interval in **Settings** (verify scheduler re-schedules in
+   logs); add an analyst + viewer in **Users**; test **Forgot password**; confirm
+   non-admins can't reach `/settings` or `/users`.
 
 ---
 
 ## Self-review notes (addressed)
 
-- **Spec coverage:** Graph ingest (M5), decompress gzip/zip/plain (M2), dual-namespace parse (M3), dedup (Task 1.2/4.1), safe-delete vs move-to-Errors (Task 5.3), normalized schema incl. `report_extension` + `ingest_log` (M1), dropped-field capture (Task 3.3 + 4.1), all 6 dashboard views (M9), GeoIP map (Task 9.4/10.2), simple login (M7), 15-min cron (M6), email digests weekly+monthly via MailerSend (M9.6), Docker on local Docker (M11), Entra setup doc (M10). RUF/TLS-RPT, recommendations engine, multi-user, instant alerts explicitly out of scope.
-- **Type consistency:** `Filters`, `DmarcReport`/`DmarcRecord`, `IngestResult`, query return shapes are defined once and reused by pages.
-- **Known follow-ups during execution:** reverse-DNS/org enrichment for sources is left as a forward extension on the geo layer (map + country code ship now); org-name column can be added to `topSources` later without schema change. If `tar-stream/extract` import path differs by version, use `import { extract } from "tar-stream"`.
+- **Spec coverage:** DB-backed settings + encrypted secrets (Tasks 1.2/1.3), setup wizard
+  (Task 7.2), multi-user roles admin/analyst/viewer + user CRUD + last-admin guard
+  (Tasks 7.1/S.2), forgot/reset password (Task 7.4), configurable poll interval live
+  (Tasks 6.1/S.1), Settings UI (Task S.1). Graph ingest (M5), decompress gzip/zip/plain
+  (M2), dual-namespace parse (M3), dedup (Task 1.4/4.1), safe-delete vs move-to-Errors
+  (Task 5.3), normalized schema incl. `report_extension` + `ingest_log` (M1),
+  dropped-field capture (Task 3.3 + 4.1), all 6 dashboard views (M9), GeoIP map
+  (Task 9.4/10.2), email digests weekly+monthly via MailerSend (M9.6), Docker single
+  data volume (M11), Entra setup doc (M10). RUF/TLS-RPT, recommendations engine, instant
+  alerts, SSO explicitly out of scope.
+- **Auth runtime:** all session/role/setup guards run in Node-runtime server layouts and
+  API routes (DB + `app.key` access), never Edge middleware. iron-session cookie secret is
+  derived from `app.key`.
+- **Secret handling:** secrets are AES-256-GCM encrypted in `setting`; the Settings API
+  masks them (`********`) and skips masked values on save so an unchanged field never
+  overwrites the stored secret.
+- **Type consistency:** `Filters`, `DmarcReport`/`DmarcRecord`, `IngestResult`, `Role`,
+  `AppUser`, `SETTING_DEFS`, and query return shapes are defined once and reused.
+- **Ordering note:** Task 0.2 is now bootstrap-only; crypto (1.2) + settings (1.3) come
+  after the schema (1.1); the repository is Task 1.4. Graph/scheduler/digest read
+  credentials from the settings service, so live smoke tests require the wizard to have
+  run (or settings pre-seeded).
+- **Known follow-ups:** reverse-DNS/org enrichment is a forward extension on the geo layer
+  (map + country code ship now). If `tar-stream/extract` import path differs by version,
+  use `import { extract } from "tar-stream"`.
 ```
