@@ -19,6 +19,12 @@ export const SETTING_DEFS: Record<string, Def> = {
   digest_weekly_cron:    { type: "string", default: "0 8 * * 1" },
   digest_monthly_cron:   { type: "string", default: "0 8 1 * *" },
   maxmind_license_key:   { type: "secret", default: "" },
+  // White-label / branding
+  brand_app_name:        { type: "string", default: "DMARC Dashboard" },
+  brand_primary:         { type: "string", default: "#0093a2" },
+  brand_accent:          { type: "string", default: "#00df7e" },
+  brand_logo_ext:        { type: "string", default: "" },   // e.g. "svg"/"png"; "" => wordmark
+  brand_favicon_ext:     { type: "string", default: "" },   // e.g. "svg"/"ico"/"png"
 };
 
 function key(keyPath?: string) { return getOrCreateKey(keyPath ?? bootstrap().keyPath); }
