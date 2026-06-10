@@ -15,10 +15,13 @@ export default async function SourcesPage({ searchParams }: { searchParams: Prom
   const sources = topSources(dbPath, f, 100);
   const domains = listDomains(dbPath);
 
-  const points: { lat: number; lon: number; messages: number; failRate: number }[] = [];
+  const points: { lat: number; lon: number; messages: number; failRate: number; sourceIp: string; pass: number; fail: number; country?: string }[] = [];
   for (const s of sources.slice(0, 100)) {
     const geo = await locate(s.sourceIp);
-    if (geo) points.push({ lat: geo.lat, lon: geo.lon, messages: s.messages, failRate: s.messages ? s.fail / s.messages : 0 });
+    if (geo) points.push({
+      lat: geo.lat, lon: geo.lon, messages: s.messages, failRate: s.messages ? s.fail / s.messages : 0,
+      sourceIp: s.sourceIp, pass: s.pass, fail: s.fail, country: geo.country,
+    });
   }
 
   return (
