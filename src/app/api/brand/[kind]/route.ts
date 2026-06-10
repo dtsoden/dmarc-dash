@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import fs from "node:fs";
-import { getSession } from "@/lib/auth/guard";
+import { isWizardOrAdmin } from "@/lib/auth/guard";
 import { setSetting } from "@/lib/settings";
 import { brandDir, brandFilePath, getBrand, mimeForExt, extFromName } from "@/lib/brand";
 
@@ -31,7 +31,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ kind: s
   });
 }
 
-async function ensureAdmin() { const s = await getSession(); return s.loggedIn && s.role === "admin"; }
+async function ensureAdmin() { return isWizardOrAdmin(); }
 
 export async function POST(req: Request, { params }: { params: Promise<{ kind: string }> }) {
   if (!(await ensureAdmin())) return NextResponse.json({ error: "Forbidden" }, { status: 403 });

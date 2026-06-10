@@ -92,6 +92,19 @@ CREATE TABLE IF NOT EXISTS password_reset (
   used_at INTEGER
 );
 
+-- Mailbox sources: one row per monitored domain (Graph or IMAP). Secrets encrypted.
+CREATE TABLE IF NOT EXISTS mailbox_source (
+  id INTEGER PRIMARY KEY,
+  domain TEXT NOT NULL UNIQUE,
+  provider TEXT NOT NULL,                  -- graph | imap
+  graph_tenant_id TEXT, graph_client_id TEXT, graph_client_secret TEXT, mailbox_upn TEXT,
+  imap_host TEXT, imap_port INTEGER DEFAULT 993, imap_username TEXT, imap_password TEXT,
+  imap_tls INTEGER DEFAULT 1, imap_folder TEXT DEFAULT 'INBOX',
+  is_active INTEGER NOT NULL DEFAULT 1,
+  last_poll_at INTEGER, last_poll_status TEXT, last_poll_detail TEXT,
+  created_at INTEGER NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_record_report ON record(report_id);
 CREATE INDEX IF NOT EXISTS idx_record_srcip ON record(source_ip_norm);
 CREATE INDEX IF NOT EXISTS idx_record_headerfrom ON record(header_from);

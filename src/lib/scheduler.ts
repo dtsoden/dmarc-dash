@@ -2,7 +2,7 @@ import cron, { type ScheduledTask } from "node-cron";
 import { migrate } from "@/lib/db/migrate";
 import { getSetting } from "@/lib/settings";
 import { processMailbox } from "@/lib/graph/mailbox";
-import { createActiveSource } from "@/lib/mailbox/source";
+import { listSourcesSafe, getSourceRow, buildSourceClient, recordPoll, migrateLegacySource } from "@/lib/mailbox/store";
 import { sendDigest } from "@/lib/email/send-digest";
 
 let pollTask: ScheduledTask | null = null;
@@ -22,22 +22,38 @@ function minutesToCron(min: number): string {
 export async function runPollOnce() {
   if (running) { console.log("[poll] previous run still in progress, skipping"); return { skipped: true }; }
   running = true;
-  let active: Awaited<ReturnType<typeof createActiveSource>> = null;
   try {
-    active = await createActiveSource();
-    if (!active) {
-      console.log("[poll] no mailbox source configured; skipping");
+    migrateLegacySource();
+    const sources = listSourcesSafe().filter((s) => s.isActive);
+    if (!sources.length) {
+      console.log("[poll] no mailbox sources configured; skipping");
       return { skipped: true };
     }
     const deleteMode = getSetting<"safe" | "hard">("delete_mode");
-    const res = await processMailbox(active.source, { deleteMode });
-    console.log(`[poll] ${new Date().toISOString()}`, res);
-    return res;
+    // Poll every mailbox concurrently; one failing source never blocks the others.
+    const settled = await Promise.allSettled(sources.map(async (s) => {
+      const row = getSourceRow(s.id);
+      let active: Awaited<ReturnType<typeof buildSourceClient>> | null = null;
+      try {
+        active = await buildSourceClient(row);
+        const res = await processMailbox(active.source, { deleteMode });
+        recordPoll(s.id, "ok", `ingested ${res.ingested}, dup ${res.duplicates}, failed ${res.failed}, deleted ${res.deleted}, moved ${res.movedToErrors}`);
+        return { domain: s.domain, ...res };
+      } catch (e: any) {
+        recordPoll(s.id, "error", String(e?.message ?? e));
+        return { domain: s.domain, error: String(e?.message ?? e) };
+      } finally {
+        if (active) { try { await active.close(); } catch { /* ignore */ } }
+      }
+    }));
+    const perSource = settled.map((r) => (r.status === "fulfilled" ? r.value : { error: String(r.reason) }));
+    const ingested = perSource.reduce((n, r: any) => n + (r.ingested ?? 0), 0);
+    console.log(`[poll] ${new Date().toISOString()} ${sources.length} source(s), ${ingested} ingested`);
+    return { sources: perSource, ingested };
   } catch (e) {
     console.error("[poll] error:", e);
     return { error: String((e as any)?.message ?? e) };
   } finally {
-    if (active) { try { await active.close(); } catch { /* ignore */ } }
     running = false;
   }
 }
