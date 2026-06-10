@@ -171,6 +171,11 @@ const Schema = z.object({
   SESSION_SECRET: z.string().min(32),
   DB_PATH: z.string().default("data/dmarc.db"),
   DELETE_MODE: z.enum(["safe", "hard"]).default("safe"),
+  MAILERSEND_API_TOKEN: z.string().optional(),
+  MAILERSEND_FROM: z.string().default("dmarc@beaconspec.com"),
+  DIGEST_RECIPIENTS: z.string().default("david.soden@beaconspec.com,duane.walker@beaconspec.com"),
+  DIGEST_WEEKLY_CRON: z.string().default("0 8 * * 1"),
+  DIGEST_MONTHLY_CRON: z.string().default("0 8 1 * *"),
 });
 
 export function parseConfig(env: NodeJS.ProcessEnv) {
@@ -180,6 +185,9 @@ export function parseConfig(env: NodeJS.ProcessEnv) {
     mailboxUpn: p.MAILBOX_UPN, pollCron: p.POLL_CRON, maxmindKey: p.MAXMIND_LICENSE_KEY,
     adminUser: p.ADMIN_USER, adminPasswordHash: p.ADMIN_PASSWORD_HASH,
     sessionSecret: p.SESSION_SECRET, dbPath: p.DB_PATH, deleteMode: p.DELETE_MODE,
+    mailersendToken: p.MAILERSEND_API_TOKEN, mailersendFrom: p.MAILERSEND_FROM,
+    digestRecipients: p.DIGEST_RECIPIENTS.split(",").map((s) => s.trim()).filter(Boolean),
+    digestWeeklyCron: p.DIGEST_WEEKLY_CRON, digestMonthlyCron: p.DIGEST_MONTHLY_CRON,
   };
 }
 
@@ -208,12 +216,33 @@ ADMIN_PASSWORD_HASH=
 SESSION_SECRET=
 DB_PATH=data/dmarc.db
 DELETE_MODE=safe
+MAILERSEND_API_TOKEN=
+MAILERSEND_FROM=dmarc@beaconspec.com
+DIGEST_RECIPIENTS=david.soden@beaconspec.com,duane.walker@beaconspec.com
+DIGEST_WEEKLY_CRON=0 8 * * 1
+DIGEST_MONTHLY_CRON=0 8 1 * *
 ```
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Update the config test to cover digest fields**
+
+Append to `tests/config.test.ts` inside the existing `describe`:
+```ts
+  it("splits DIGEST_RECIPIENTS into a trimmed array with defaults", () => {
+    const cfg = parseConfig({
+      TENANT_ID: "t", CLIENT_ID: "c", CLIENT_SECRET: "s",
+      MAILBOX_UPN: "dmarc@example.com", ADMIN_USER: "admin",
+      ADMIN_PASSWORD_HASH: "$2a$10$abc", SESSION_SECRET: "x".repeat(32),
+    } as any);
+    expect(cfg.digestRecipients).toEqual(["david.soden@beaconspec.com", "duane.walker@beaconspec.com"]);
+    expect(cfg.digestWeeklyCron).toBe("0 8 * * 1");
+  });
+```
+Run: `npm test -- tests/config.test.ts`  Expected: PASS.
+
+- [ ] **Step 7: Commit**
 
 ```bash
-git add -A && git commit -m "Add validated config loader"
+git add -A && git commit -m "Add validated config loader with digest settings"
 ```
 
 ---
@@ -2454,6 +2483,320 @@ git add -A && git commit -m "Add authentication, policy, reports, and ingest-log
 
 ---
 
+## Milestone 9.6: Email digests (MailerSend)
+
+> Closes the main gap vs. Postmark Premium. Depends on the query layer (M8) and scheduler (M6). The MailerSend API token lives at `C:/Users/DavidSoden/registry/email_access_token.txt`; copy it into `.env` as `MAILERSEND_API_TOKEN` (never commit it).
+
+### Task D.1: Digest summary query
+
+**Files:** Modify `src/lib/db/queries.ts`; Test add to `tests/queries.test.ts`
+
+- [ ] **Step 1: Write the failing test (append to `tests/queries.test.ts`)**
+
+```ts
+import { digestSummary } from "@/lib/db/queries";
+
+describe("digestSummary", () => {
+  it("returns kpis, top sources, and new sources for a window", () => {
+    seed();
+    const s = digestSummary(TMP, { from: 0, to: 9_999_999_999 }, 0);
+    expect(s.kpis.totalMessages).toBe(12);
+    expect(s.topSources.length).toBeGreaterThan(0);
+    // every source is "new" when prevWindowStart is after all data (no prior history)
+    expect(Array.isArray(s.newSources)).toBe(true);
+  });
+});
+```
+
+- [ ] **Step 2: Run test, expect FAIL**
+
+Run: `npm test -- tests/queries.test.ts`  Expected: FAIL (digestSummary not defined).
+
+- [ ] **Step 3: Implement `digestSummary` in `src/lib/db/queries.ts`**
+
+```ts
+export function digestSummary(dbPath: string | undefined, f: Filters, prevWindowStart: number) {
+  const kpis = overviewKpis(dbPath, f);
+  const topSources = topSources_(dbPath, f, 10);
+  const db = getDb(dbPath);
+  // Sources seen in this window that were never seen before prevWindowStart.
+  const newSources = db.prepare(`
+    SELECT DISTINCT rec.source_ip AS sourceIp
+    FROM record rec JOIN report r ON r.id = rec.report_id
+    WHERE r.date_begin >= ?
+      AND rec.source_ip NOT IN (
+        SELECT DISTINCT rec2.source_ip FROM record rec2 JOIN report r2 ON r2.id = rec2.report_id
+        WHERE r2.date_begin < ?
+      )`).all(f.from ?? 0, prevWindowStart).map((r: any) => r.sourceIp) as string[];
+  return { kpis, topSources, newSources };
+}
+```
+
+(Note: `topSources_` is an internal alias — rename the existing exported `topSources` call here to the exported name `topSources`. Concretely: call the already-defined `topSources(dbPath, f, 10)`; do not create a new function. The line should read `const topSources = topSources(dbPath, f, 10);` renamed to a local `const top = topSources(dbPath, f, 10);` to avoid shadowing, and return `{ kpis, topSources: top, newSources }`.)
+
+- [ ] **Step 4: Run test, expect PASS**
+
+Run: `npm test -- tests/queries.test.ts`  Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add -A && git commit -m "Add digest summary query"
+```
+
+### Task D.2: MailerSend client
+
+**Files:** Create `src/lib/email/mailersend.ts`; Test `tests/mailersend.test.ts`
+
+- [ ] **Step 1: Write the failing test (mock fetch, assert request shape)**
+
+```ts
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { sendEmail } from "@/lib/email/mailersend";
+
+describe("sendEmail", () => {
+  beforeEach(() => { vi.restoreAllMocks(); });
+  it("POSTs to MailerSend with auth header and recipients", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 202, text: async () => "" });
+    vi.stubGlobal("fetch", fetchMock);
+    await sendEmail({
+      token: "tok", from: "dmarc@beaconspec.com", fromName: "DMARC",
+      to: ["a@x.com", "b@x.com"], subject: "Weekly", html: "<p>hi</p>",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.mailersend.com/v1/email");
+    expect((init.headers as any).Authorization).toBe("Bearer tok");
+    const body = JSON.parse(init.body);
+    expect(body.to).toEqual([{ email: "a@x.com" }, { email: "b@x.com" }]);
+    expect(body.subject).toBe("Weekly");
+  });
+
+  it("throws on non-2xx", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 422, text: async () => "bad" }));
+    await expect(sendEmail({ token: "t", from: "f@x.com", to: ["a@x.com"], subject: "s", html: "h" }))
+      .rejects.toThrow(/422/);
+  });
+});
+```
+
+- [ ] **Step 2: Run test, expect FAIL**
+
+Run: `npm test -- tests/mailersend.test.ts`  Expected: FAIL.
+
+- [ ] **Step 3: Implement `src/lib/email/mailersend.ts`**
+
+```ts
+export interface SendEmailOpts {
+  token: string; from: string; fromName?: string;
+  to: string[]; subject: string; html: string; text?: string;
+}
+
+export async function sendEmail(o: SendEmailOpts): Promise<void> {
+  const res = await fetch("https://api.mailersend.com/v1/email", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${o.token}`,
+      "Content-Type": "application/json",
+      "X-Requested-With": "XMLHttpRequest",
+    },
+    body: JSON.stringify({
+      from: { email: o.from, name: o.fromName ?? "DMARC Dashboard" },
+      to: o.to.map((email) => ({ email })),
+      subject: o.subject,
+      html: o.html,
+      text: o.text ?? o.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(),
+    }),
+  });
+  if (!res.ok) throw new Error(`MailerSend send failed: ${res.status} ${await res.text()}`);
+}
+```
+
+- [ ] **Step 4: Run test, expect PASS**
+
+Run: `npm test -- tests/mailersend.test.ts`  Expected: PASS (2 tests).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add -A && git commit -m "Add MailerSend email client"
+```
+
+### Task D.3: Digest builder (HTML) + runner
+
+**Files:** Create `src/lib/email/digest.ts`; Test `tests/digest.test.ts`
+
+- [ ] **Step 1: Write the failing test `tests/digest.test.ts`**
+
+```ts
+import { describe, it, expect, afterEach } from "vitest";
+import fs from "node:fs";
+import { migrate } from "@/lib/db/migrate";
+import { closeDb } from "@/lib/db/connection";
+import { ingestAttachment } from "@/lib/ingest/ingest";
+import { buildDigestHtml } from "@/lib/email/digest";
+
+const TMP = "data/test-digest.db";
+afterEach(() => { closeDb(); for (const s of ["","-wal","-shm"]) fs.rmSync(TMP+s,{force:true}); });
+
+describe("buildDigestHtml", () => {
+  it("renders compliance and top sources into HTML", () => {
+    migrate(TMP);
+    for (const f of ["google.xml","microsoft.xml","rfc9990.xml"])
+      ingestAttachment(fs.readFileSync(`tests/fixtures/${f}`), f, "m-"+f, TMP);
+    const { subject, html } = buildDigestHtml(TMP, "weekly", { from: 0, to: 9_999_999_999 }, 0);
+    expect(subject).toMatch(/Weekly DMARC/i);
+    expect(html).toContain("12"); // total messages
+    expect(html).toContain("40.92.0.1"); // a top source
+    expect(html).toMatch(/%/); // a compliance percentage
+  });
+});
+```
+
+- [ ] **Step 2: Run test, expect FAIL**
+
+Run: `npm test -- tests/digest.test.ts`  Expected: FAIL.
+
+- [ ] **Step 3: Implement `src/lib/email/digest.ts`**
+
+```ts
+import { digestSummary, type Filters } from "@/lib/db/queries";
+
+function pct(n: number, total: number) { return total ? Math.round((n / total) * 100) : 0; }
+
+export function buildDigestHtml(
+  dbPath: string | undefined, period: "weekly" | "monthly", f: Filters, prevWindowStart: number,
+): { subject: string; html: string } {
+  const s = digestSummary(dbPath, f, prevWindowStart);
+  const k = s.kpis;
+  const label = period === "weekly" ? "Weekly" : "Monthly";
+  const subject = `${label} DMARC digest — ${pct(k.dmarcPass, k.totalMessages)}% compliant, ${k.totalMessages.toLocaleString()} messages`;
+
+  const sourceRows = s.topSources.map((src) => `
+    <tr>
+      <td style="padding:6px 10px;font-family:monospace;font-size:12px">${src.sourceIp}</td>
+      <td style="padding:6px 10px;text-align:right">${src.messages.toLocaleString()}</td>
+      <td style="padding:6px 10px;text-align:right;color:#16a34a">${src.pass.toLocaleString()}</td>
+      <td style="padding:6px 10px;text-align:right;color:#dc2626">${src.fail.toLocaleString()}</td>
+    </tr>`).join("");
+
+  const newSources = s.newSources.length
+    ? `<p style="margin:8px 0;color:#b45309"><strong>${s.newSources.length} new sending source(s)</strong>: ${s.newSources.slice(0, 15).join(", ")}</p>`
+    : `<p style="margin:8px 0;color:#64748b">No new sending sources this period.</p>`;
+
+  const html = `
+  <div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:640px;margin:0 auto;color:#0f172a">
+    <h1 style="font-size:20px">${label} DMARC digest</h1>
+    <table style="width:100%;border-collapse:collapse;margin:16px 0">
+      <tr>
+        <td style="padding:12px;border:1px solid #e2e8f0"><div style="font-size:12px;color:#64748b">Messages</div><div style="font-size:22px;font-weight:700">${k.totalMessages.toLocaleString()}</div></td>
+        <td style="padding:12px;border:1px solid #e2e8f0"><div style="font-size:12px;color:#64748b">DMARC pass</div><div style="font-size:22px;font-weight:700">${pct(k.dmarcPass, k.totalMessages)}%</div></td>
+        <td style="padding:12px;border:1px solid #e2e8f0"><div style="font-size:12px;color:#64748b">SPF / DKIM</div><div style="font-size:22px;font-weight:700">${pct(k.spfPass, k.totalMessages)}% / ${pct(k.dkimPass, k.totalMessages)}%</div></td>
+      </tr>
+      <tr>
+        <td style="padding:12px;border:1px solid #e2e8f0"><div style="font-size:12px;color:#64748b">Quarantined</div><div style="font-size:22px;font-weight:700">${k.quarantined.toLocaleString()}</div></td>
+        <td style="padding:12px;border:1px solid #e2e8f0"><div style="font-size:12px;color:#64748b">Rejected</div><div style="font-size:22px;font-weight:700">${k.rejected.toLocaleString()}</div></td>
+        <td style="padding:12px;border:1px solid #e2e8f0"><div style="font-size:12px;color:#64748b">Sources</div><div style="font-size:22px;font-weight:700">${k.distinctSources.toLocaleString()}</div></td>
+      </tr>
+    </table>
+    ${newSources}
+    <h2 style="font-size:15px;margin-top:24px">Top sending sources</h2>
+    <table style="width:100%;border-collapse:collapse;border:1px solid #e2e8f0">
+      <tr style="background:#f8fafc;text-align:left">
+        <th style="padding:6px 10px">Source IP</th><th style="padding:6px 10px;text-align:right">Messages</th>
+        <th style="padding:6px 10px;text-align:right">Pass</th><th style="padding:6px 10px;text-align:right">Fail</th>
+      </tr>
+      ${sourceRows}
+    </table>
+    <p style="margin-top:24px;font-size:12px;color:#94a3b8">Generated by your self-hosted DMARC Dashboard.</p>
+  </div>`;
+
+  return { subject, html };
+}
+```
+
+- [ ] **Step 4: Run test, expect PASS**
+
+Run: `npm test -- tests/digest.test.ts`  Expected: PASS.
+
+- [ ] **Step 5: Implement `src/lib/email/send-digest.ts`** (window math + send)
+
+```ts
+import { config } from "@/lib/config";
+import { buildDigestHtml } from "./digest";
+import { sendEmail } from "./mailersend";
+
+const DAY = 86400;
+
+export async function sendDigest(period: "weekly" | "monthly", now: number): Promise<void> {
+  const cfg = config();
+  if (!cfg.mailersendToken) { console.warn("[digest] MAILERSEND_API_TOKEN not set; skipping"); return; }
+  const span = period === "weekly" ? 7 * DAY : 30 * DAY;
+  const from = now - span;
+  const prevWindowStart = now - 2 * span;
+  const { subject, html } = buildDigestHtml(cfg.dbPath, period, { from, to: now }, prevWindowStart);
+  await sendEmail({
+    token: cfg.mailersendToken, from: cfg.mailersendFrom, fromName: "DMARC Dashboard",
+    to: cfg.digestRecipients, subject, html,
+  });
+  console.log(`[digest] sent ${period} digest to ${cfg.digestRecipients.join(", ")}`);
+}
+```
+
+- [ ] **Step 6: Implement `scripts/send-digest.ts`** (manual run)
+
+```ts
+import "dotenv/config";
+import { migrate } from "@/lib/db/migrate";
+import { sendDigest } from "@/lib/email/send-digest";
+
+const period = (process.argv[2] as "weekly" | "monthly") ?? "weekly";
+(async () => {
+  migrate();
+  await sendDigest(period, Math.floor(Date.now() / 1000));
+})().catch((e) => { console.error(e); process.exit(1); });
+```
+Add script: `"digest": "tsx scripts/send-digest.ts"`. Usage: `npm run digest -- weekly`.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add -A && git commit -m "Add digest HTML builder and send runner"
+```
+
+### Task D.4: Wire digests into the scheduler
+
+**Files:** Modify `src/lib/scheduler.ts`
+
+- [ ] **Step 1: Add digest cron jobs to `startScheduler()` in `src/lib/scheduler.ts`**
+
+Add this import at the top:
+```ts
+import { sendDigest } from "@/lib/email/send-digest";
+```
+Then inside `startScheduler()`, after the existing `cron.schedule(cfg.pollCron, ...)` line, add:
+```ts
+  if (cfg.mailersendToken) {
+    if (cron.validate(cfg.digestWeeklyCron))
+      cron.schedule(cfg.digestWeeklyCron, () => { void sendDigest("weekly", Math.floor(Date.now() / 1000)); });
+    if (cron.validate(cfg.digestMonthlyCron))
+      cron.schedule(cfg.digestMonthlyCron, () => { void sendDigest("monthly", Math.floor(Date.now() / 1000)); });
+    console.log(`[scheduler] digests scheduled (weekly "${cfg.digestWeeklyCron}", monthly "${cfg.digestMonthlyCron}")`);
+  } else {
+    console.log("[scheduler] MAILERSEND_API_TOKEN not set; digests disabled");
+  }
+```
+
+- [ ] **Step 2: Verify boot**
+
+Run: `npm run dev`  Expected: logs show digest schedule lines when the token is set. Stop the server.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add -A && git commit -m "Schedule weekly and monthly digests"
+```
+
 ## Milestone 10: Entra setup doc + GeoLite2 fetch
 
 ### Task 10.1: Entra app-registration walkthrough
@@ -2502,6 +2845,9 @@ Test-ApplicationAccessPolicy -Identity someoneelse@yourdomain.com -AppId <CLIENT
 Copy `.env.example` to `.env`, fill TENANT_ID/CLIENT_ID/CLIENT_SECRET/MAILBOX_UPN.
 Generate the admin password hash: `npm run hash:password 'your-password'` → ADMIN_PASSWORD_HASH.
 Generate a session secret: any 32+ char random string → SESSION_SECRET.
+For digests, copy the MailerSend token from `C:/Users/DavidSoden/registry/email_access_token.txt`
+into MAILERSEND_API_TOKEN, set MAILERSEND_FROM to a verified MailerSend sender domain, and
+adjust DIGEST_RECIPIENTS if needed (defaults: david.soden@ and duane.walker@beaconspec.com).
 
 ## 6. Smoke test
 `npm run poll:once` → should print a poll result and create rows in `data/dmarc.db`.
@@ -2679,7 +3025,7 @@ git add -A && git commit -m "Add Docker packaging and compose"
 
 **Files:** Create `README.md`
 
-- [ ] **Step 1: Write `README.md`** covering: what it does, the Entra setup pointer (`docs/SETUP-ENTRA.md`), env vars, `npm run hash:password`, `npm run fetch:geo`, `docker compose up`, the 15-min poll, and the safe-delete behavior + `DMARC-Errors` folder.
+- [ ] **Step 1: Write `README.md`** covering: what it does, a short feature comparison vs. Postmark DMARC Digests Premium (we match all-sources + dashboard, exceed on retention, add geo map + digests), the Entra setup pointer (`docs/SETUP-ENTRA.md`), env vars, `npm run hash:password`, `npm run fetch:geo`, `npm run digest -- weekly|monthly`, `docker compose up`, the 15-min poll, weekly/monthly digests, and the safe-delete behavior + `DMARC-Errors` folder.
 
 - [ ] **Step 2: Commit**
 
@@ -2703,13 +3049,14 @@ Run: `npx tsc --noEmit && npm run build`  Expected: no errors.
 
 1. `npm run fetch:geo` (optional map data).
 2. `npm run poll:once` → reports ingested, emails deleted (or moved to `DMARC-Errors` on parse failure).
-3. `docker compose up -d` → dashboard at `http://localhost:3000`, all pages populated.
+3. `npm run digest -- weekly` → confirm both recipients receive the digest email.
+4. `docker compose up -d` → dashboard at `http://localhost:3000`, all pages populated; scheduler logs show poll + digest crons.
 
 ---
 
 ## Self-review notes (addressed)
 
-- **Spec coverage:** Graph ingest (M5), decompress gzip/zip/plain (M2), dual-namespace parse (M3), dedup (Task 1.2/4.1), safe-delete vs move-to-Errors (Task 5.3), normalized schema incl. `report_extension` + `ingest_log` (M1), dropped-field capture (Task 3.3 + 4.1), all 6 dashboard views (M9), GeoIP map (Task 9.4/10.2), simple login (M7), 15-min cron (M6), Docker on local Docker (M11), Entra setup doc (M10). RUF/TLS-RPT explicitly out of scope.
+- **Spec coverage:** Graph ingest (M5), decompress gzip/zip/plain (M2), dual-namespace parse (M3), dedup (Task 1.2/4.1), safe-delete vs move-to-Errors (Task 5.3), normalized schema incl. `report_extension` + `ingest_log` (M1), dropped-field capture (Task 3.3 + 4.1), all 6 dashboard views (M9), GeoIP map (Task 9.4/10.2), simple login (M7), 15-min cron (M6), email digests weekly+monthly via MailerSend (M9.6), Docker on local Docker (M11), Entra setup doc (M10). RUF/TLS-RPT, recommendations engine, multi-user, instant alerts explicitly out of scope.
 - **Type consistency:** `Filters`, `DmarcReport`/`DmarcRecord`, `IngestResult`, query return shapes are defined once and reused by pages.
 - **Known follow-ups during execution:** reverse-DNS/org enrichment for sources is left as a forward extension on the geo layer (map + country code ship now); org-name column can be added to `topSources` later without schema change. If `tar-stream/extract` import path differs by version, use `import { extract } from "tar-stream"`.
 ```

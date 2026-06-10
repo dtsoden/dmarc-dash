@@ -22,6 +22,9 @@ administrators. Runs unattended in Docker, polling every 15 minutes by default.
 - **Dashboard auth: simple single-admin login** (username + hashed password, session
   cookie).
 - **GeoIP map included**, using MaxMind GeoLite2 (free license key, optional config).
+- **Email digests (weekly + monthly)** via MailerSend, to a configured recipient list.
+  This closes the main gap vs. Postmark DMARC Digests Premium. Recommendations engine,
+  multi-user, and instant alerts are intentionally out of scope.
 - **Deployment: local Docker now** (docker-compose + `.env`), portable to EasyPanel later.
 
 ## 3. Architecture
@@ -110,7 +113,22 @@ TDD focused on the parser/ingest pipeline:
 - Schema mapping and union-field handling.
 - Unknown-field capture into `report_extension` + `ingest_log.dropped_fields`.
 
-## 8. Configuration (`.env`)
+## 8. Email digests
+
+Scheduled summary emails sent via MailerSend (REST API; token stored at
+`C:/Users/DavidSoden/registry/email_access_token.txt`, copied into `.env`).
+
+- **Weekly** and **monthly** digests on their own cron schedules.
+- Content: overall DMARC/SPF/DKIM compliance %, total volume, quarantined/rejected
+  counts, top sending sources (pass/fail), new sources first seen in the period, and
+  trend vs. the previous period. HTML email built from the same query layer the
+  dashboard uses.
+- Recipients come from `DIGEST_RECIPIENTS` (comma-separated), default
+  `david.soden@beaconspec.com, duane.walker@beaconspec.com`.
+- A one-shot `npm run digest -- weekly|monthly` command is provided for manual sends and
+  testing.
+
+## 9. Configuration (`.env`)
 
 ```
 TENANT_ID
@@ -124,15 +142,21 @@ ADMIN_PASSWORD_HASH
 SESSION_SECRET
 DB_PATH
 DELETE_MODE        # safe (default) | hard
+MAILERSEND_API_TOKEN
+MAILERSEND_FROM=dmarc@beaconspec.com
+DIGEST_RECIPIENTS=david.soden@beaconspec.com,duane.walker@beaconspec.com
+DIGEST_WEEKLY_CRON=0 8 * * 1      # Mondays 08:00
+DIGEST_MONTHLY_CRON=0 8 1 * *     # 1st of month 08:00
 ```
 
-## 9. Out of scope (v1)
+## 10. Out of scope (v1)
 
 Schema leaves room but these are not built now:
 - Forensic / failure (RUF / AFRF) reports.
 - SMTP TLS Reporting (TLS-RPT, JSON, RFC 8460).
+- Recommendations engine, multi-user/teams, instant (non-digest) alerts.
 
-## 10. References
+## 11. References
 
 - RFC 7489 Appendix C (legacy aggregate schema).
 - RFC 9990 — DMARC Aggregate Reporting (DMARCbis, current standard).
