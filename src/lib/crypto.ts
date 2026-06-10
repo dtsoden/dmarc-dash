@@ -6,6 +6,9 @@ export function getOrCreateKey(keyPath: string): Buffer {
   if (fs.existsSync(keyPath)) {
     const buf = fs.readFileSync(keyPath);
     if (buf.length === 32) return buf;
+    // The file exists but is the wrong size (truncated/corrupted). Overwriting would
+    // silently make every stored secret undecryptable, so fail loudly instead.
+    throw new Error(`App key at ${keyPath} is corrupt (expected 32 bytes, got ${buf.length}). Restore it from backup or remove it to start fresh.`);
   }
   const key = crypto.randomBytes(32);
   fs.mkdirSync(path.dirname(keyPath), { recursive: true });

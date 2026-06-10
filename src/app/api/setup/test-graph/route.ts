@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { GraphAuth } from "@/lib/graph/auth";
 import { GraphClient } from "@/lib/graph/client";
+import { isWizardOrAdmin } from "@/lib/auth/guard";
 
 export async function POST(req: Request) {
+  if (!(await isWizardOrAdmin())) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const { tenantId, clientId, clientSecret, mailboxUpn } = await req.json();
   try {
     const client = new GraphClient(new GraphAuth({ tenantId, clientId, clientSecret }), mailboxUpn);

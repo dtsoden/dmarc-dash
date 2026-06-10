@@ -29,3 +29,12 @@ export async function requireRole(...roles: Role[]): Promise<SessionData> {
   if (!s.role || !roles.includes(s.role)) redirect("/");
   return s;
 }
+
+// Wizard helper endpoints (test-graph / test-email) are usable BEFORE any admin exists
+// (during first-run setup). Once setup is complete they must require an admin session,
+// otherwise they are an open credential-probe / mail-send relay.
+export async function isWizardOrAdmin(): Promise<boolean> {
+  if (!isSetupComplete()) return true;
+  const s = await getSession();
+  return s.loggedIn === true && s.role === "admin";
+}

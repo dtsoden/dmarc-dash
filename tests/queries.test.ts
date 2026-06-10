@@ -3,7 +3,7 @@ import fs from "node:fs";
 import { migrate } from "@/lib/db/migrate";
 import { closeDb } from "@/lib/db/connection";
 import { ingestAttachment } from "@/lib/ingest/ingest";
-import { overviewKpis, volumeByDay, topSources, dispositionBreakdown, digestSummary } from "@/lib/db/queries";
+import { overviewKpis, volumeByDay, topSources, dispositionBreakdown, authQuadrant, digestSummary } from "@/lib/db/queries";
 
 const TMP = "data/test-queries.db";
 afterEach(() => { closeDb(); for (const s of ["","-wal","-shm"]) fs.rmSync(TMP+s,{force:true}); });
@@ -48,6 +48,20 @@ describe("queries", () => {
     expect(v[0]).toHaveProperty("day");
     expect(v[0]).toHaveProperty("pass");
     expect(v[0]).toHaveProperty("fail");
+  });
+
+  it("authQuadrant computes the four buckets and returns zeros (not null) on empty data", () => {
+    // Regression: on a fresh install with no reports, SUM(...) returns NULL and the
+    // Authentication page crashed. COALESCE must keep these numeric.
+    migrate(TMP);
+    const empty = authQuadrant(TMP, {});
+    expect(empty).toEqual({ both: 0, dkimOnly: 0, spfOnly: 0, neither: 0 });
+    seed();
+    const q = authQuadrant(TMP, {});
+    expect(q.both).toBe(3);     // rfc9990: count3, dkim+spf pass
+    expect(q.neither).toBe(7);  // microsoft: count7, both fail
+    expect(q.dkimOnly).toBe(2); // google: count2, dkim pass only
+    expect(q.spfOnly).toBe(0);
   });
 });
 

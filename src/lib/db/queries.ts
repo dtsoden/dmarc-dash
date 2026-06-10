@@ -70,10 +70,10 @@ export function authQuadrant(dbPath: string | undefined, f: Filters) {
   const db = getDb(dbPath); const { clause, params } = where(f);
   return db.prepare(`
     SELECT
-      SUM(CASE WHEN dkim_aligned='pass' AND spf_aligned='pass' THEN count ELSE 0 END) AS both,
-      SUM(CASE WHEN dkim_aligned='pass' AND (spf_aligned IS NULL OR spf_aligned<>'pass') THEN count ELSE 0 END) AS dkimOnly,
-      SUM(CASE WHEN spf_aligned='pass' AND (dkim_aligned IS NULL OR dkim_aligned<>'pass') THEN count ELSE 0 END) AS spfOnly,
-      SUM(CASE WHEN (dkim_aligned IS NULL OR dkim_aligned<>'pass') AND (spf_aligned IS NULL OR spf_aligned<>'pass') THEN count ELSE 0 END) AS neither
+      COALESCE(SUM(CASE WHEN dkim_aligned='pass' AND spf_aligned='pass' THEN count ELSE 0 END),0) AS both,
+      COALESCE(SUM(CASE WHEN dkim_aligned='pass' AND (spf_aligned IS NULL OR spf_aligned<>'pass') THEN count ELSE 0 END),0) AS dkimOnly,
+      COALESCE(SUM(CASE WHEN spf_aligned='pass' AND (dkim_aligned IS NULL OR dkim_aligned<>'pass') THEN count ELSE 0 END),0) AS spfOnly,
+      COALESCE(SUM(CASE WHEN (dkim_aligned IS NULL OR dkim_aligned<>'pass') AND (spf_aligned IS NULL OR spf_aligned<>'pass') THEN count ELSE 0 END),0) AS neither
     FROM record rec JOIN report r ON r.id=rec.report_id LEFT JOIN policy_published pp ON pp.report_id=r.id ${clause}`)
     .get(...params) as { both: number; dkimOnly: number; spfOnly: number; neither: number };
 }
