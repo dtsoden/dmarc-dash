@@ -1,8 +1,8 @@
 "use client";
 import { usePathname } from "next/navigation";
-import { BookOpen } from "lucide-react";
 import { ThemeToggle } from "./theme-toggle";
 import { PollNowButton } from "./poll-now-button";
+import { HelpLink } from "./help-link";
 import type { Role } from "@/lib/auth/session";
 
 const TITLES: Record<string, string> = {
@@ -26,10 +26,7 @@ export function AppHeader({ role }: { role: Role }) {
       <h1 className="font-display text-lg font-semibold tracking-tight">{title}</h1>
       <div className="ml-auto flex items-center gap-2">
         {canPoll && <PollNowButton />}
-        <a href="/docs" target="_blank" rel="noopener noreferrer" title="Documentation"
-          className="grid h-9 w-9 place-items-center rounded-lg border border-border bg-card text-muted-foreground transition-colors hover:text-foreground">
-          <BookOpen className="size-[18px]" />
-        </a>
+        <HelpLink href="/docs" />
         <ThemeToggle />
       </div>
     </header>

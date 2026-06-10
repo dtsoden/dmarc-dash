@@ -402,7 +402,7 @@ function SourceManager() {
           The mailboxes monitored for DMARC reports. One source per domain: Microsoft 365 for Office 365, or IMAP for Gmail/Workspace and others.
         </p>
         <div className="flex shrink-0 items-center gap-2">
-          <HelpLink href="/docs/mailbox/choosing-a-provider" label="Setup help" />
+          <HelpLink href="/docs/mailbox/choosing-a-provider" />
           {!showAdd && (
             <button type="button" onClick={() => setShowAdd(true)}
               className="inline-flex items-center gap-2 rounded-lg bg-primary px-3.5 py-2 text-sm font-medium text-primary-foreground">

@@ -2,6 +2,7 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Mail, Server, Check, Upload, Trash2 } from "lucide-react";
+import { HelpLink } from "@/components/help-link";
 
 const RECIPIENTS_DEFAULT = "david.soden@beaconspec.com, duane.walker@beaconspec.com";
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -197,10 +198,7 @@ export default function SetupWizard() {
         {step === 1 && (<>
           <div className="flex items-center justify-between gap-3">
             <h2 className="font-display font-medium">2. Mailbox source</h2>
-            <a href={provider === "graph" ? "/docs/mailbox/microsoft-365" : "/docs/mailbox/imap"} target="_blank" rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">
-              Setup guide
-            </a>
+            <HelpLink href={provider === "graph" ? "/docs/mailbox/microsoft-365" : "/docs/mailbox/imap"} />
           </div>
           <p className="text-sm text-muted-foreground">Which domain do these DMARC reports cover, and where do they arrive? Pick one source. You can add more domains later from Settings.</p>
           <div><label className={labelCls}>Domain</label>
