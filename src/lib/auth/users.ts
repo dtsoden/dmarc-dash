@@ -4,12 +4,13 @@ import type { Role } from "./session";
 
 export interface AppUser {
   id: number; username: string; email: string; role: Role;
-  isActive: boolean; mustChangePassword: boolean;
+  isActive: boolean; mustChangePassword: boolean; lastLoginAt: number | null;
 }
 
 function mapUser(r: any): AppUser {
   return { id: r.id, username: r.username, email: r.email, role: r.role,
-    isActive: !!r.is_active, mustChangePassword: !!r.must_change_password };
+    isActive: !!r.is_active, mustChangePassword: !!r.must_change_password,
+    lastLoginAt: r.last_login_at ?? null };
 }
 
 export function createUser(

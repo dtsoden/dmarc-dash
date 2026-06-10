@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { Mail, Server, Inbox, Clock, Send, Globe, Palette, Trash2, Upload, Plus, CheckCircle, AlertTriangle, Pencil } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { useDialog } from "@/components/dialog";
 
 const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 const DOMAIN_RE = /^(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))+$/i;
@@ -416,6 +417,7 @@ function SourceManager() {
 function providerLabel(p: Provider) { return p === "graph" ? "Microsoft 365" : "IMAP"; }
 
 function SourceCard({ source, onChanged }: { source: Source; onChanged: () => void }) {
+  const dialog = useDialog();
   const [editing, setEditing] = useState(false);
   const [testMsg, setTestMsg] = useState("");
   const [testOk, setTestOk] = useState<boolean | null>(null);
@@ -448,7 +450,12 @@ function SourceCard({ source, onChanged }: { source: Source; onChanged: () => vo
   }
 
   async function remove() {
-    if (!confirm(`Remove monitoring for ${source.domain}? This stops polling and deletes its mailbox credentials.`)) return;
+    const ok = await dialog.confirm({
+      title: "Remove domain",
+      message: <>Stop monitoring <strong>{source.domain}</strong>? This stops polling and deletes its mailbox credentials.</>,
+      confirmLabel: "Remove", destructive: true,
+    });
+    if (!ok) return;
     const r = await fetch(`/api/sources/${source.id}`, { method: "DELETE" });
     if (r.ok) onChanged(); else setSaveMsg("Failed to remove this domain.");
   }
