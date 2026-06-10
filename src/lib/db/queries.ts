@@ -106,6 +106,21 @@ export function ingestLog(dbPath: string | undefined, limit = 200) {
     FROM ingest_log ORDER BY processed_at DESC LIMIT ?`).all(limit) as any[];
 }
 
+export function digestSummary(dbPath: string | undefined, f: Filters, prevWindowStart: number) {
+  const kpis = overviewKpis(dbPath, f);
+  const top = topSources(dbPath, f, 10);
+  const db = getDb(dbPath);
+  const newSources = db.prepare(`
+    SELECT DISTINCT rec.source_ip AS sourceIp
+    FROM record rec JOIN report r ON r.id = rec.report_id
+    WHERE r.date_begin >= ?
+      AND rec.source_ip NOT IN (
+        SELECT DISTINCT rec2.source_ip FROM record rec2 JOIN report r2 ON r2.id = rec2.report_id
+        WHERE r2.date_begin < ?
+      )`).all(f.from ?? 0, prevWindowStart).map((r: any) => r.sourceIp) as string[];
+  return { kpis, topSources: top, newSources };
+}
+
 export function droppedFieldsSummary(dbPath?: string) {
   const rows = getDb(dbPath).prepare(`SELECT dropped_fields FROM ingest_log WHERE dropped_fields IS NOT NULL`).all() as any[];
   const counts = new Map<string, number>();

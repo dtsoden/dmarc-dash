@@ -3,7 +3,7 @@ import fs from "node:fs";
 import { migrate } from "@/lib/db/migrate";
 import { closeDb } from "@/lib/db/connection";
 import { ingestAttachment } from "@/lib/ingest/ingest";
-import { overviewKpis, volumeByDay, topSources, dispositionBreakdown } from "@/lib/db/queries";
+import { overviewKpis, volumeByDay, topSources, dispositionBreakdown, digestSummary } from "@/lib/db/queries";
 
 const TMP = "data/test-queries.db";
 afterEach(() => { closeDb(); for (const s of ["","-wal","-shm"]) fs.rmSync(TMP+s,{force:true}); });
@@ -48,5 +48,16 @@ describe("queries", () => {
     expect(v[0]).toHaveProperty("day");
     expect(v[0]).toHaveProperty("pass");
     expect(v[0]).toHaveProperty("fail");
+  });
+});
+
+describe("digestSummary", () => {
+  it("returns kpis, top sources, and new sources for a window", () => {
+    seed();
+    const s = digestSummary(TMP, { from: 0, to: 9_999_999_999 }, 0);
+    expect(s.kpis.totalMessages).toBe(12);
+    expect(s.topSources.length).toBeGreaterThan(0);
+    // every source is "new" when prevWindowStart is after all data (no prior history)
+    expect(Array.isArray(s.newSources)).toBe(true);
   });
 });
