@@ -1,12 +1,24 @@
 "use client";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Mail, Server, Check } from "lucide-react";
+import { Mail, Server, Check, Upload, Trash2 } from "lucide-react";
 
 const RECIPIENTS_DEFAULT = "david.soden@beaconspec.com, duane.walker@beaconspec.com";
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const DOMAIN_RE = /^(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))+$/i;
+const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
+const STEP_COUNT = 6;
 
 type ProviderChoice = "graph" | "imap";
+
+// Readable text (near-black or white) on a given hex, matching the server's logic.
+function previewText(hex: string): string {
+  const h = (hex || "").replace("#", "");
+  const fhex = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  if (fhex.length !== 6) return "#ffffff";
+  const r = parseInt(fhex.slice(0, 2), 16) / 255, g = parseInt(fhex.slice(2, 4), 16) / 255, b = parseInt(fhex.slice(4, 6), 16) / 255;
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) > 0.6 ? "#0b1a14" : "#ffffff";
+}
 
 export default function SetupWizard() {
   const router = useRouter();
@@ -17,13 +29,20 @@ export default function SetupWizard() {
   const [provider, setProvider] = useState<ProviderChoice>("graph");
   const [f, setF] = useState({
     username: "", email: "", password: "",
+    domain: "",
     tenantId: "", clientId: "", clientSecret: "", mailboxUpn: "",
     imapHost: "", imapPort: "993", imapUsername: "", imapPassword: "", imapTls: true, imapFolder: "INBOX",
     intervalMinutes: "15", deleteMode: "safe",
     token: "", from: "dmarc@beaconspec.com", recipients: RECIPIENTS_DEFAULT,
     weeklyCron: "0 8 * * 1", monthlyCron: "0 8 1 * *", maxmind: "",
+    appName: "DMARC Dashboard", colorLight: "#0093a2", colorDark: "#00df7e", defaultTheme: "dark",
   });
   const set = (k: string, v: string | boolean) => setF((s) => ({ ...s, [k]: v }));
+  const logoInput = useRef<HTMLInputElement>(null);
+  const faviconInput = useRef<HTMLInputElement>(null);
+  const [logoUp, setLogoUp] = useState(false);
+  const [faviconUp, setFaviconUp] = useState(false);
+  const [brandMsg, setBrandMsg] = useState("");
 
   // Per-step validation. Returns an error string, or "" when the step is valid.
   function validateStep(s: number): string {
@@ -33,6 +52,7 @@ export default function SetupWizard() {
       if (f.password.length < 8) return "Admin password must be at least 8 characters.";
     }
     if (s === 1) {
+      if (!DOMAIN_RE.test(f.domain.trim())) return "Enter the domain these reports cover, e.g. example.com.";
       if (provider === "graph") {
         if (!f.tenantId.trim()) return "Tenant ID is required.";
         if (!f.clientId.trim()) return "Client ID is required.";
@@ -69,8 +89,8 @@ export default function SetupWizard() {
     if (e) { setErr(e); return; }
     setErr(""); setMsg("Testing connection...");
     try {
-      const r = await fetch("/api/setup/test-graph", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tenantId: f.tenantId.trim(), clientId: f.clientId.trim(), clientSecret: f.clientSecret, mailboxUpn: f.mailboxUpn.trim() }) }).then((r) => r.json());
+      const r = await fetch("/api/sources/test", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: "graph", graph: { tenantId: f.tenantId.trim(), clientId: f.clientId.trim(), clientSecret: f.clientSecret, mailboxUpn: f.mailboxUpn.trim() } }) }).then((r) => r.json());
       setMsg(r.ok ? "Connected: the mailbox is reachable." : `Connection failed: ${r.error}`);
     } catch { setMsg("Connection test failed to reach the server."); }
   }
@@ -79,10 +99,28 @@ export default function SetupWizard() {
     if (e) { setErr(e); return; }
     setErr(""); setMsg("Testing connection...");
     try {
-      const r = await fetch("/api/setup/test-imap", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ host: f.imapHost.trim(), port: Number(f.imapPort), username: f.imapUsername.trim(), password: f.imapPassword, tls: f.imapTls, folder: f.imapFolder.trim() || "INBOX" }) }).then((r) => r.json());
+      const r = await fetch("/api/sources/test", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: "imap", imap: { host: f.imapHost.trim(), port: Number(f.imapPort), username: f.imapUsername.trim(), password: f.imapPassword, tls: f.imapTls, folder: f.imapFolder.trim() || "INBOX" } }) }).then((r) => r.json());
       setMsg(r.ok ? "Connected: the mailbox is reachable." : `Connection failed: ${r.error}`);
     } catch { setMsg("Connection test failed to reach the server."); }
+  }
+
+  async function uploadBrand(kind: "logo" | "favicon", file: File) {
+    setBrandMsg(`Uploading ${kind}...`);
+    const fd = new FormData();
+    fd.append("file", file);
+    try {
+      const r = await fetch(`/api/brand/${kind}`, { method: "POST", body: fd });
+      if (r.ok) { if (kind === "logo") setLogoUp(true); else setFaviconUp(true); setBrandMsg(""); }
+      else setBrandMsg(`Failed to upload ${kind}.`);
+    } catch { setBrandMsg(`Failed to upload ${kind}.`); }
+  }
+  async function removeBrand(kind: "logo" | "favicon") {
+    try {
+      const r = await fetch(`/api/brand/${kind}`, { method: "DELETE" });
+      if (r.ok) { if (kind === "logo") setLogoUp(false); else setFaviconUp(false); setBrandMsg(""); }
+      else setBrandMsg(`Failed to remove ${kind}.`);
+    } catch { setBrandMsg(`Failed to remove ${kind}.`); }
   }
   async function testEmail() {
     setMsg("Sending test email...");
@@ -108,18 +146,20 @@ export default function SetupWizard() {
       if (e) { setStep(s); setErr(e); return; }
     }
     setErr(""); setBusy(true); setMsg("Saving...");
+    const source: Record<string, unknown> = { domain: f.domain.trim(), provider };
+    if (provider === "graph") {
+      source.graph = { tenantId: f.tenantId.trim(), clientId: f.clientId.trim(), clientSecret: f.clientSecret, mailboxUpn: f.mailboxUpn.trim() };
+    } else {
+      source.imap = { host: f.imapHost.trim(), port: Number(f.imapPort), username: f.imapUsername.trim(), password: f.imapPassword, tls: f.imapTls, folder: f.imapFolder.trim() || "INBOX" };
+    }
     const body: Record<string, unknown> = {
       admin: { username: f.username.trim(), email: f.email.trim(), password: f.password },
-      provider,
+      source,
       poll: { intervalMinutes: Number(f.intervalMinutes), deleteMode: f.deleteMode },
       email: f.token.trim() ? { token: f.token, from: f.from.trim(), recipients: f.recipients.split(",").map((x) => x.trim()).filter(Boolean), weeklyCron: f.weeklyCron.trim(), monthlyCron: f.monthlyCron.trim() } : undefined,
       maxmind: f.maxmind.trim() ? { key: f.maxmind.trim() } : undefined,
+      brand: { appName: f.appName.trim() || "DMARC Dashboard", colorLight: HEX_RE.test(f.colorLight) ? f.colorLight : "#0093a2", colorDark: HEX_RE.test(f.colorDark) ? f.colorDark : "#00df7e", defaultTheme: f.defaultTheme === "light" ? "light" : "dark" },
     };
-    if (provider === "graph") {
-      body.graph = { tenantId: f.tenantId.trim(), clientId: f.clientId.trim(), clientSecret: f.clientSecret, mailboxUpn: f.mailboxUpn.trim() };
-    } else {
-      body.imap = { host: f.imapHost.trim(), port: Number(f.imapPort), username: f.imapUsername.trim(), password: f.imapPassword, tls: f.imapTls, folder: f.imapFolder.trim() || "INBOX" };
-    }
     try {
       const r = await fetch("/api/setup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       if (r.ok) { router.push("/"); return; }
@@ -141,7 +181,7 @@ export default function SetupWizard() {
   return (
     <div className="mx-auto max-w-lg p-8">
       <h1 className="mb-1 font-display text-2xl font-semibold">DMARC Dashboard setup</h1>
-      <p className="mb-6 text-sm text-muted-foreground">Step {step + 1} of 5</p>
+      <p className="mb-6 text-sm text-muted-foreground">Step {step + 1} of {STEP_COUNT}</p>
       <div className="card-elev space-y-3 rounded-2xl border border-border bg-card p-6">
         {step === 0 && (<>
           <h2 className="font-display font-medium">1. Administrator account</h2>
@@ -156,7 +196,10 @@ export default function SetupWizard() {
 
         {step === 1 && (<>
           <h2 className="font-display font-medium">2. Mailbox source</h2>
-          <p className="text-sm text-muted-foreground">Where do your DMARC reports arrive? Pick one source. You can switch later from Settings.</p>
+          <p className="text-sm text-muted-foreground">Which domain do these DMARC reports cover, and where do they arrive? Pick one source. You can add more domains later from Settings.</p>
+          <div><label className={labelCls}>Domain</label>
+            <input className={input} placeholder="example.com" value={f.domain} onChange={(e) => set("domain", e.target.value)} />
+            <p className="mt-1 text-xs text-muted-foreground">The domain whose DMARC aggregate reports land in this mailbox.</p></div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <button type="button" onClick={() => selectProvider("graph")}
               className={`relative flex flex-col gap-1 rounded-2xl border p-4 text-left transition ${provider === "graph" ? "border-primary bg-primary/5 brand-glow" : "border-border bg-card hover:border-primary/40"}`}>
@@ -255,12 +298,68 @@ export default function SetupWizard() {
             <input className={input} type="password" value={f.maxmind} onChange={(e) => set("maxmind", e.target.value)} /></div>
         </>)}
 
+        {step === 5 && (<>
+          <h2 className="font-display font-medium">6. Branding (optional)</h2>
+          <p className="text-sm text-muted-foreground">White-label the dashboard. All defaults are fine; you can change everything later in Settings.</p>
+          <div><label className={labelCls}>Application name</label>
+            <input className={input} value={f.appName} onChange={(e) => set("appName", e.target.value)} /></div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div><label className={labelCls}>Light mode color</label>
+              <div className="flex items-center gap-2">
+                <input type="color" className="h-10 w-12 rounded-md border" value={HEX_RE.test(f.colorLight) ? f.colorLight : "#0093a2"} onChange={(e) => set("colorLight", e.target.value)} />
+                <input className={input + " font-mono"} value={f.colorLight} onChange={(e) => set("colorLight", e.target.value)} />
+                <span className="rounded-md px-3 py-1.5 text-sm font-medium" style={{ background: HEX_RE.test(f.colorLight) ? f.colorLight : "#0093a2", color: previewText(f.colorLight) }}>Button</span>
+              </div></div>
+            <div><label className={labelCls}>Dark mode color</label>
+              <div className="flex items-center gap-2">
+                <input type="color" className="h-10 w-12 rounded-md border" value={HEX_RE.test(f.colorDark) ? f.colorDark : "#00df7e"} onChange={(e) => set("colorDark", e.target.value)} />
+                <input className={input + " font-mono"} value={f.colorDark} onChange={(e) => set("colorDark", e.target.value)} />
+                <span className="rounded-md px-3 py-1.5 text-sm font-medium" style={{ background: HEX_RE.test(f.colorDark) ? f.colorDark : "#00df7e", color: previewText(f.colorDark) }}>Button</span>
+              </div></div>
+          </div>
+
+          <label className="flex items-center justify-between gap-3 rounded-md border bg-muted/40 p-3 text-sm">
+            <span>Default to {f.defaultTheme === "light" ? "light" : "dark"} mode for new visitors</span>
+            <button type="button" role="switch" aria-checked={f.defaultTheme === "dark"} onClick={() => set("defaultTheme", f.defaultTheme === "dark" ? "light" : "dark")}
+              className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${f.defaultTheme === "dark" ? "bg-primary" : "bg-muted-foreground/30"}`}>
+              <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${f.defaultTheme === "dark" ? "translate-x-[22px]" : "translate-x-0.5"}`} />
+            </button>
+          </label>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="space-y-2">
+              <label className={labelCls}>Logo</label>
+              {logoUp
+                ? <div className="flex items-center gap-3">
+                    <img src="/api/brand/logo" alt="Logo" className="h-12 w-auto max-w-[160px] rounded-md border bg-background p-1" />
+                    <button type="button" className="inline-flex items-center gap-1.5 rounded-lg border border-destructive/50 px-3 py-1.5 text-sm text-destructive hover:bg-destructive/10" onClick={() => removeBrand("logo")}><Trash2 className="size-4" /> Remove</button>
+                  </div>
+                : <p className="text-xs text-muted-foreground">Optional. The wordmark is shown if you skip this.</p>}
+              <input ref={logoInput} type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) uploadBrand("logo", file); e.target.value = ""; }} />
+              <button type="button" className="inline-flex items-center gap-2 rounded-lg border px-3.5 py-2 text-sm" onClick={() => logoInput.current?.click()}><Upload className="size-4" /> Upload logo</button>
+            </div>
+            <div className="space-y-2">
+              <label className={labelCls}>Favicon</label>
+              {faviconUp
+                ? <div className="flex items-center gap-3">
+                    <img src="/api/brand/favicon" alt="Favicon" className="h-10 w-10 rounded-md border bg-background p-1" />
+                    <button type="button" className="inline-flex items-center gap-1.5 rounded-lg border border-destructive/50 px-3 py-1.5 text-sm text-destructive hover:bg-destructive/10" onClick={() => removeBrand("favicon")}><Trash2 className="size-4" /> Remove</button>
+                  </div>
+                : <p className="text-xs text-muted-foreground">Optional. The default favicon is shown if you skip this.</p>}
+              <input ref={faviconInput} type="file" accept="image/*,.ico" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) uploadBrand("favicon", file); e.target.value = ""; }} />
+              <button type="button" className="inline-flex items-center gap-2 rounded-lg border px-3.5 py-2 text-sm" onClick={() => faviconInput.current?.click()}><Upload className="size-4" /> Upload favicon</button>
+            </div>
+          </div>
+          {brandMsg && <p className="text-sm text-muted-foreground">{brandMsg}</p>}
+        </>)}
+
         {err && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">{err}</p>}
         {msg && <p className="text-sm text-muted-foreground">{msg}</p>}
 
         <div className="flex justify-between pt-2">
           <button type="button" disabled={step === 0 || busy} className="rounded-lg border px-3.5 py-2 text-sm disabled:opacity-40" onClick={back}>Back</button>
-          {step < 4
+          {step < STEP_COUNT - 1
             ? <button type="button" disabled={busy} className="rounded-lg bg-primary px-3.5 py-2 text-sm font-medium text-primary-foreground" onClick={next}>Next</button>
             : <button type="button" disabled={busy} className="rounded-lg bg-primary px-3.5 py-2 text-sm font-medium text-primary-foreground disabled:opacity-60" onClick={finish}>{busy ? "Saving..." : "Finish"}</button>}
         </div>
