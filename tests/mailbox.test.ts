@@ -42,4 +42,32 @@ describe("processMailbox", () => {
     await processMailbox(c as any, { deleteMode: "hard" }, ingest);
     expect(c.deleteMessage).toHaveBeenCalledWith("m1");
   });
+
+  it("LEAVES ordinary mail completely untouched (no report attachment, no report subject)", async () => {
+    const c = fakeClient({
+      listInbox: vi.fn().mockResolvedValue([
+        { id: "n1", subject: "Lunch tomorrow?" },                 // no attachments
+        { id: "n2", subject: "Invoice attached" },                // normal attachment
+      ]),
+      getFileAttachments: vi.fn(async (id: string) =>
+        id === "n2" ? [{ id: "a", name: "invoice.pdf", contentBytes: Buffer.from("x").toString("base64") }] : []),
+    });
+    const ingest = vi.fn().mockReturnValue({ status: "failed", recordsIngested: 0 });
+    const res = await processMailbox(c as any, { deleteMode: "safe" }, ingest);
+    expect(c.deleteMessage).not.toHaveBeenCalled();   // nothing deleted
+    expect(c.moveMessage).not.toHaveBeenCalled();     // nothing moved to DMARC-Errors
+    expect(ingest).not.toHaveBeenCalled();            // ordinary attachments never even parsed
+    expect(res.skipped).toBe(2);
+  });
+
+  it("does not delete in hard mode when the email is not a DMARC report", async () => {
+    const c = fakeClient({
+      listInbox: vi.fn().mockResolvedValue([{ id: "n1", subject: "hello" }]),
+      getFileAttachments: vi.fn().mockResolvedValue([{ id: "a", name: "photo.jpg", contentBytes: "" }]),
+    });
+    const ingest = vi.fn();
+    await processMailbox(c as any, { deleteMode: "hard" }, ingest);
+    expect(c.deleteMessage).not.toHaveBeenCalled();
+    expect(c.moveMessage).not.toHaveBeenCalled();
+  });
 });
