@@ -1,0 +1,11 @@
+services:
+  dmarc-dash:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      DATA_DIR: /app/data
+      # PORT optional; defaults to 3000
+    volumes:
+      - ./data:/app/data      # holds dmarc.db, GeoLite2-City.mmdb, app.key
+    restart: unless-stopped
