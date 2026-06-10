@@ -17,7 +17,8 @@ Once setup is complete, the wizard's test endpoints are locked. You manage every
 
 Create the first admin. This account can do everything: manage users, mailboxes, notifications, branding, and all settings.
 
-- Email address (also the login).
+- Username.
+- Email address.
 - Password (minimum 8 characters).
 
 The last remaining administrator cannot later be deleted, demoted, or deactivated.
@@ -45,7 +46,7 @@ You can add more domains later under **Settings -> Mailbox Monitoring**. See [Mu
 ## Step 3: Polling and delete mode
 
 - **Poll interval (minutes):** one global interval applies to all mailboxes. Set it to `1` while testing, then raise it for production.
-- **Delete mode:** controls what happens to a report email after it is successfully ingested. Reports are soft-deleted (moved to Deleted Items) only after a successful ingest. Ordinary mail is never touched. See [Polling and Safe-Delete](./polling-and-safe-delete.md).
+- **Delete mode (on parse failure):** controls what happens to a genuine DMARC report that cannot be parsed. In **safe** mode (the default) it is moved to a `DMARC-Errors` folder for review; in **hard** mode it is deleted anyway. A report that ingests successfully is always soft-deleted (moved to Deleted Items) regardless of this setting, and ordinary mail is never touched. See [Polling and Safe-Delete](./polling-and-safe-delete.md).
 
 ## Step 4: Notifications (optional)
 

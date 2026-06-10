@@ -1,9 +1,10 @@
 "use client";
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
-import { Mail, Server, Inbox, Clock, Send, Globe, Palette, Trash2, Upload, Plus, CheckCircle, AlertTriangle, Pencil } from "lucide-react";
+import { Mail, Server, Inbox, Clock, Send, Globe, Palette, Trash2, Upload, Plus, CheckCircle, AlertTriangle, Pencil, Download, ShieldAlert, DatabaseBackup } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useDialog } from "@/components/dialog";
 import { HelpLink } from "@/components/help-link";
+import { RestoreCard } from "@/components/restore-card";
 
 const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 const DOMAIN_RE = /^(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))+$/i;
@@ -138,6 +139,7 @@ export function SettingsForm() {
         <TabsTrigger value="email"><Send /> Notifications</TabsTrigger>
         <TabsTrigger value="geoip"><Globe /> GeoIP</TabsTrigger>
         <TabsTrigger value="branding"><Palette /> Branding</TabsTrigger>
+        <TabsTrigger value="backup"><DatabaseBackup /> Backup</TabsTrigger>
       </TabsList>
 
       {/* MAILBOX MONITORING */}
@@ -273,7 +275,84 @@ export function SettingsForm() {
           </section>
         </div>
       </TabsContent>
+
+      {/* BACKUP */}
+      <TabsContent value="backup" className="pt-4">
+        <BackupPanel />
+      </TabsContent>
     </Tabs>
+  );
+}
+
+function BackupPanel() {
+  const [tab, setTab] = useState<"backup" | "restore">("backup");
+  return (
+    <Tabs value={tab} onValueChange={(v) => setTab((v as "backup" | "restore") ?? "backup")} className="w-full">
+      <TabsList>
+        <TabsTrigger value="backup">Backup</TabsTrigger>
+        <TabsTrigger value="restore">Restore</TabsTrigger>
+      </TabsList>
+      <TabsContent value="backup" className="pt-4"><BackupCard /></TabsContent>
+      <TabsContent value="restore" className="pt-4"><RestoreCard /></TabsContent>
+    </Tabs>
+  );
+}
+
+function BackupCard() {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  // Stream the zip via a blob so we can surface server-side errors (a plain anchor
+  // would silently navigate to a JSON error page on failure).
+  async function download() {
+    setBusy(true); setErr("");
+    try {
+      const r = await fetch("/api/backup");
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error(d.error || `Backup failed (${r.status})`);
+      }
+      const blob = await r.blob();
+      const cd = r.headers.get("Content-Disposition") || "";
+      const name = /filename="([^"]+)"/.exec(cd)?.[1] || "dmarc-backup.zip";
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Backup failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className={card}>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="font-display font-medium">Backup</h2>
+        <HelpLink href="/docs/backup-and-restore" />
+      </div>
+      <p className="text-sm text-muted-foreground">
+        Download a single zip of the entire data folder: the database, the encryption key,
+        the GeoIP database, and your branding assets. To move this dashboard to another server
+        (a new Docker host, Easypanel, anywhere), unzip it into that instance&apos;s data folder
+        before first start and everything comes across exactly as it is here.
+      </p>
+      <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+        <ShieldAlert className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+        <p className="text-muted-foreground">
+          This archive contains your encryption key and the encrypted mailbox credentials.
+          Treat it like a password: store it somewhere private.
+        </p>
+      </div>
+      <div className="flex items-center gap-3">
+        <button type="button" className={`inline-flex items-center gap-2 ${btnPrimary}`} onClick={download} disabled={busy}>
+          <Download className="size-4" /> {busy ? "Preparing backup..." : "Download backup"}
+        </button>
+        {err && <p className="text-sm text-destructive">{err}</p>}
+      </div>
+    </section>
   );
 }
 

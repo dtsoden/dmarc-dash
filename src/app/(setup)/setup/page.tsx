@@ -1,8 +1,9 @@
 "use client";
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Mail, Server, Check, Upload, Trash2 } from "lucide-react";
+import { Mail, Server, Check, Upload, Trash2, RotateCcw } from "lucide-react";
 import { HelpLink } from "@/components/help-link";
+import { RestoreCard } from "@/components/restore-card";
 
 const RECIPIENTS_DEFAULT = "david.soden@beaconspec.com, duane.walker@beaconspec.com";
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -24,6 +25,7 @@ function previewText(hex: string): string {
 export default function SetupWizard() {
   const router = useRouter();
   const [step, setStep] = useState(0);
+  const [restoreMode, setRestoreMode] = useState(false);
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
@@ -182,6 +184,13 @@ export default function SetupWizard() {
   return (
     <div className="mx-auto max-w-lg p-8">
       <h1 className="mb-1 font-display text-2xl font-semibold">DMARC Dashboard setup</h1>
+      {restoreMode ? (
+        <div className="space-y-4">
+          <p className="mb-2 text-sm text-muted-foreground">Restore this fresh instance from a backup taken on another dashboard. The entire data volume, including the admin login, is replaced with the backup&apos;s contents.</p>
+          <RestoreCard />
+          <button type="button" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground" onClick={() => setRestoreMode(false)}>&larr; Back to guided setup</button>
+        </div>
+      ) : (<>
       <p className="mb-6 text-sm text-muted-foreground">Step {step + 1} of {STEP_COUNT}</p>
       <div className="card-elev space-y-3 rounded-2xl border border-border bg-card p-6">
         {step === 0 && (<>
@@ -368,6 +377,12 @@ export default function SetupWizard() {
             : <button type="button" disabled={busy} className="rounded-lg bg-primary px-3.5 py-2 text-sm font-medium text-primary-foreground disabled:opacity-60" onClick={finish}>{busy ? "Saving..." : "Finish"}</button>}
         </div>
       </div>
+      {step === 0 && (
+        <button type="button" className="mt-4 inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => { setRestoreMode(true); setErr(""); setMsg(""); }}>
+          <RotateCcw className="size-4" /> Restore from a backup instead
+        </button>
+      )}
+      </>)}
     </div>
   );
 }

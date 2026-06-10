@@ -23,8 +23,8 @@ The final remaining administrator cannot be deleted, demoted, or deactivated, so
 
 Adding users requires notifications (MailerSend) to be configured. See [Notifications](./notifications.md).
 
-1. Go to the users area in **Settings**.
-2. Add the user's email and choose a role.
+1. Go to the **Users** area.
+2. Enter the user's username and email, and choose a role.
 3. The user receives a **single-use invite link** that is valid for **7 days**.
 4. They follow the link and set their own password.
 

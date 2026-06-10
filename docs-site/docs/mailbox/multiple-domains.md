@@ -17,7 +17,7 @@ DMARC Dashboard monitors as many domains as you like. The Setup Wizard configure
 ## Add a domain
 
 1. Go to **Settings -> Mailbox Monitoring**.
-2. Click to add a new mailbox source.
+2. Click the **Add domain** button. It reveals a form for a new mailbox source.
 3. Enter the **domain**, choose the **provider** (Microsoft 365 / Graph or IMAP), and enter its credentials. See [Microsoft 365](./microsoft-365.md) or [IMAP](./imap.md).
 4. Use **Test connection** to confirm the credentials reach the mailbox.
 5. Save. The new source joins the next poll cycle.
