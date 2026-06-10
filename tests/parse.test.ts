@@ -44,3 +44,16 @@ describe("parseDmarcXml", () => {
     expect(r.records[0].sourceIpNorm).toBe("209.85.220.41");
   });
 });
+
+import { collectUnknownFields } from "@/lib/ingest/parse";
+
+describe("collectUnknownFields", () => {
+  it("reports unknown elements under known parents", () => {
+    const xml = `<feedback><report_metadata><org_name>x</org_name><weird_field>v</weird_field></report_metadata>
+      <policy_published><domain>d</domain></policy_published>
+      <record><row><source_ip>1.1.1.1</source_ip><count>1</count><mystery>1</mystery></row></record></feedback>`;
+    const unknown = collectUnknownFields(xml);
+    expect(unknown).toContain("report_metadata.weird_field");
+    expect(unknown).toContain("record.row.mystery");
+  });
+});

@@ -84,3 +84,33 @@ export function parseDmarcXml(xml: string, filename?: string): DmarcReport {
     records,
   };
 }
+
+const KNOWN: Record<string, Set<string>> = {
+  feedback: new Set(["version","report_metadata","policy_published","record","extension","@_xmlns"]),
+  report_metadata: new Set(["org_name","email","extra_contact_info","report_id","date_range","error","generator"]),
+  date_range: new Set(["begin","end"]),
+  policy_published: new Set(["domain","p","sp","np","adkim","aspf","pct","fo","discovery_method","testing"]),
+  record: new Set(["row","identifiers","auth_results"]),
+  row: new Set(["source_ip","count","policy_evaluated"]),
+  policy_evaluated: new Set(["disposition","dkim","spf","reason"]),
+  reason: new Set(["type","comment"]),
+  identifiers: new Set(["header_from","envelope_from","envelope_to"]),
+  auth_results: new Set(["dkim","spf"]),
+};
+
+export function collectUnknownFields(xml: string): string[] {
+  const doc = parser.parse(xml);
+  const result: string[] = [];
+  const walk2 = (node: any, name: string, prefix: string) => {
+    if (node === null || typeof node !== "object") return;
+    const known = KNOWN[name];
+    for (const key of Object.keys(node)) {
+      if (key.startsWith("@_")) continue;
+      const p = prefix ? `${prefix}.${key}` : key;
+      if (known && !known.has(key)) result.push(p);
+      for (const c of (Array.isArray(node[key]) ? node[key] : [node[key]])) walk2(c, key, p);
+    }
+  };
+  walk2(doc.feedback, "feedback", "");
+  return Array.from(new Set(result));
+}
