@@ -144,6 +144,19 @@
   h1, h2, h3, h4, .font-display { font-family: var(--font-display), var(--font-sans), sans-serif; letter-spacing: -0.01em; }
   ::selection { background: color-mix(in srgb, var(--brand-accent) 30%, transparent); }
 
+  /* Theme every native form control by default so dropdowns/inputs are always readable
+     in both modes. :where() keeps specificity 0, so any explicit Tailwind bg/text class
+     still wins. Excludes controls whose background is meaningful (color/file/checkbox...). */
+  select, textarea,
+  input:where(:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"])) {
+    background-color: var(--background);
+    color: var(--foreground);
+  }
+  option, optgroup {
+    background-color: var(--background);
+    color: var(--foreground);
+  }
+
   * { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--muted-foreground) 35%, transparent) transparent; }
   *::-webkit-scrollbar { width: 9px; height: 9px; }
   *::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--muted-foreground) 30%, transparent); border-radius: 9px; border: 2px solid transparent; background-clip: content-box; }
