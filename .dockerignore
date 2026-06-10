@@ -1,5 +1,7 @@
-node_modules
+**/node_modules
 .next
 data
 .env
 .git
+docs-site/build
+docs-site/.docusaurus

@@ -1,6 +1,7 @@
 import { bootstrap } from "@/lib/config";
 import { listDomains, observedDkimPairs } from "@/lib/db/queries";
 import { getDnsReport, type DnsRecord } from "@/lib/dns/lookup";
+import { HelpLink } from "@/components/help-link";
 
 export const dynamic = "force-dynamic";
 
@@ -44,9 +45,12 @@ export default async function DnsReportPage({ searchParams }: { searchParams: Pr
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="font-display text-xl font-semibold">DNS authentication report</h2>
-        <p className="mt-1 text-sm text-muted-foreground">Read-only snapshot of the email-authentication DNS records for a domain. This queries DNS only; it never changes anything.</p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="font-display text-xl font-semibold">DNS authentication report</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Read-only snapshot of the email-authentication DNS records for a domain. This queries DNS only; it never changes anything.</p>
+        </div>
+        <HelpLink href="/docs/dns-report" />
       </div>
 
       {/* Domain chooser */}

@@ -195,7 +195,13 @@ export default function SetupWizard() {
         </>)}
 
         {step === 1 && (<>
-          <h2 className="font-display font-medium">2. Mailbox source</h2>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="font-display font-medium">2. Mailbox source</h2>
+            <a href={provider === "graph" ? "/docs/mailbox/microsoft-365" : "/docs/mailbox/imap"} target="_blank" rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">
+              Setup guide
+            </a>
+          </div>
           <p className="text-sm text-muted-foreground">Which domain do these DMARC reports cover, and where do they arrive? Pick one source. You can add more domains later from Settings.</p>
           <div><label className={labelCls}>Domain</label>
             <input className={input} placeholder="example.com" value={f.domain} onChange={(e) => set("domain", e.target.value)} />

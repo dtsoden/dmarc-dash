@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 
 import { Mail, Server, Inbox, Clock, Send, Globe, Palette, Trash2, Upload, Plus, CheckCircle, AlertTriangle, Pencil } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useDialog } from "@/components/dialog";
+import { HelpLink } from "@/components/help-link";
 
 const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 const DOMAIN_RE = /^(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))+$/i;
@@ -163,7 +164,10 @@ export function SettingsForm() {
       {/* NOTIFICATIONS (outbound email / SMTP) */}
       <TabsContent value="email" className="pt-4">
         <section className={card}>
-          <h2 className="font-display font-medium">Notifications</h2>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="font-display font-medium">Notifications</h2>
+            <HelpLink href="/docs/notifications" />
+          </div>
           <p className="text-xs text-muted-foreground">Outbound email used to <span className="font-medium text-foreground">send</span> the weekly/monthly digest reports and password-reset messages (delivered via MailerSend). This is separate from the mailbox the dashboard monitors.</p>
           <div><label className={labelCls}>MailerSend API token</label>
             <input className={input} type="password" value={f.mailersend_token} onChange={(e) => set("mailersend_token", e.target.value)} /></div>
@@ -184,7 +188,10 @@ export function SettingsForm() {
       {/* GEOIP (optional) */}
       <TabsContent value="geoip" className="pt-4">
         <section className={card}>
-          <h2 className="font-display font-medium">GeoIP <span className="text-sm font-normal text-muted-foreground">(optional)</span></h2>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="font-display font-medium">GeoIP <span className="text-sm font-normal text-muted-foreground">(optional)</span></h2>
+            <HelpLink href="/docs/geoip" />
+          </div>
           <p className="text-xs text-muted-foreground">Powers the world map of sending IPs on the Sources page. Optional. Uses a free MaxMind GeoLite2 license key; without it everything else still works.</p>
           <div><label className={labelCls}>MaxMind GeoLite2 license key</label>
             <input className={input} type="password" value={f.maxmind_license_key} onChange={(e) => set("maxmind_license_key", e.target.value)} /></div>
@@ -196,7 +203,10 @@ export function SettingsForm() {
       <TabsContent value="branding" className="pt-4">
         <div className="space-y-4">
           <section className={card}>
-            <h2 className="font-display font-medium">White-label</h2>
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="font-display font-medium">White-label</h2>
+              <HelpLink href="/docs/branding" />
+            </div>
             <div><label className={labelCls}>Application name</label>
               <input className={input} value={f.brand_app_name} onChange={(e) => set("brand_app_name", e.target.value)} /></div>
 
@@ -391,12 +401,15 @@ function SourceManager() {
         <p className="text-sm text-muted-foreground">
           The mailboxes monitored for DMARC reports. One source per domain: Microsoft 365 for Office 365, or IMAP for Gmail/Workspace and others.
         </p>
-        {!showAdd && (
-          <button type="button" onClick={() => setShowAdd(true)}
-            className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-primary px-3.5 py-2 text-sm font-medium text-primary-foreground">
-            <Plus className="size-4" /> Add domain
-          </button>
-        )}
+        <div className="flex shrink-0 items-center gap-2">
+          <HelpLink href="/docs/mailbox/choosing-a-provider" label="Setup help" />
+          {!showAdd && (
+            <button type="button" onClick={() => setShowAdd(true)}
+              className="inline-flex items-center gap-2 rounded-lg bg-primary px-3.5 py-2 text-sm font-medium text-primary-foreground">
+              <Plus className="size-4" /> Add domain
+            </button>
+          )}
+        </div>
       </div>
 
       {err && <p className="text-sm text-destructive">{err}</p>}
