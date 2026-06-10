@@ -61,15 +61,23 @@ export function GeoMap({ points }: { points: Point[] }) {
     const rect = svgRef.current!.getBoundingClientRect();
     return { x: e.clientX - rect.left, y: e.clientY - rect.top, w: rect.width, h: rect.height };
   }
-  function onPointerDown(e: React.PointerEvent) { drag.current = { px: e.clientX, py: e.clientY, ox: t.x, oy: t.y }; (e.target as Element).setPointerCapture?.(e.pointerId); }
-  function onPointerMove(e: React.PointerEvent) {
-    if (!drag.current) return;
-    const rect = svgRef.current!.getBoundingClientRect();
-    const dx = ((e.clientX - drag.current.px) / rect.width) * W;
-    const dy = ((e.clientY - drag.current.py) / rect.height) * H;
-    setT((prev) => ({ ...prev, x: drag.current!.ox + dx, y: drag.current!.oy + dy }));
+  function onPointerDown(e: React.PointerEvent) {
+    drag.current = { px: e.clientX, py: e.clientY, ox: t.x, oy: t.y };
+    try { svgRef.current?.setPointerCapture(e.pointerId); } catch { /* ignore */ }
   }
-  function onPointerUp() { drag.current = null; }
+  function onPointerMove(e: React.PointerEvent) {
+    const d = drag.current;
+    const svg = svgRef.current;
+    if (!d || !svg) return;
+    const rect = svg.getBoundingClientRect();
+    const dx = ((e.clientX - d.px) / rect.width) * W;
+    const dy = ((e.clientY - d.py) / rect.height) * H;
+    setT((prev) => ({ ...prev, x: d.ox + dx, y: d.oy + dy }));
+  }
+  function onPointerUp(e: React.PointerEvent) {
+    drag.current = null;
+    try { svgRef.current?.releasePointerCapture(e.pointerId); } catch { /* not captured */ }
+  }
   function zoomBy(f: number) {
     setT((prev) => { const k = clampK(prev.k * f); const rf = k / prev.k; return { k, x: W / 2 - (W / 2 - prev.x) * rf, y: H / 2 - (H / 2 - prev.y) * rf }; });
   }
