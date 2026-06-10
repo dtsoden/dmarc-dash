@@ -1,7 +1,15 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Sora, Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { getBrand, readableText } from "@/lib/brand";
+
+// Without this, a real iOS device falls back to a ~980px layout width and the page
+// rubber-bands side to side ("too wide"). Chrome's device emulation forces
+// width=device-width regardless, which is why the bug only shows on a real phone.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+};
 
 const display = Sora({ variable: "--font-display", subsets: ["latin"], weight: ["500", "600", "700", "800"] });
 const sans = Plus_Jakarta_Sans({ variable: "--font-sans", subsets: ["latin"] });

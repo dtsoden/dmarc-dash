@@ -135,11 +135,15 @@
 
 @layer base {
   * { border-color: var(--border); }
+  /* Backstop against horizontal overflow on mobile: clip (not hidden/auto) so it never
+     creates a scroll container and cannot break the sticky sidebar or vertical scroll. */
+  html { overflow-x: clip; }
   body {
     background: var(--background);
     color: var(--foreground);
     font-family: var(--font-sans), system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
+    max-width: 100%;
   }
   h1, h2, h3, h4, .font-display { font-family: var(--font-display), var(--font-sans), sans-serif; letter-spacing: -0.01em; }
   ::selection { background: color-mix(in srgb, var(--brand-accent) 30%, transparent); }

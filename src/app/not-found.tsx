@@ -6,7 +6,7 @@ export default function NotFound() {
   // to fill the viewport (object-contain keeps its aspect ratio) while leaving
   // room for the button below.
   return (
-    <div className="flex h-screen w-screen flex-col items-center justify-center gap-6 overflow-hidden bg-black px-6 py-8">
+    <div className="flex h-screen w-full flex-col items-center justify-center gap-6 overflow-hidden bg-black px-6 py-8">
       {/* The graphic carries its own messaging, just show it as large as it fits. */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
