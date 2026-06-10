@@ -2,7 +2,7 @@ services:
   dmarc-dash:
     build: .
     ports:
-      - "3000:3000"
+      - "9693:3000"   # host 3000 is taken by cl-frontend; dashboard is on 9693
     environment:
       DATA_DIR: /app/data
       # PORT optional; defaults to 3000
