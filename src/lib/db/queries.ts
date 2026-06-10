@@ -128,6 +128,55 @@ export function droppedFieldsSummary(dbPath?: string) {
   return Array.from(counts, ([field, count]) => ({ field, count })).sort((a, b) => b.count - a.count);
 }
 
+// Paginated, sortable, filterable ingest log.
+const INGEST_SORT: Record<string, string> = {
+  filename: "filename", reporter: "reporter", status: "status",
+  records: "records_ingested", when: "processed_at",
+};
+export function ingestLogPage(
+  dbPath: string | undefined,
+  p: { q: string; status: string; sort: string; dir: "asc" | "desc"; page: number; pageSize: number },
+) {
+  const db = getDb(dbPath);
+  const where: string[] = []; const args: any[] = [];
+  if (p.q) { where.push("(filename LIKE ? OR reporter LIKE ?)"); args.push(`%${p.q}%`, `%${p.q}%`); }
+  if (p.status) { where.push("status = ?"); args.push(p.status); }
+  const clause = where.length ? "WHERE " + where.join(" AND ") : "";
+  const col = INGEST_SORT[p.sort] ?? "processed_at";
+  const dir = p.dir === "asc" ? "ASC" : "DESC";
+  const total = (db.prepare(`SELECT COUNT(*) c FROM ingest_log ${clause}`).get(...args) as any).c as number;
+  const rows = db.prepare(
+    `SELECT id, filename, reporter, status, records_ingested AS recordsIngested, error_detail AS errorDetail, processed_at AS processedAt
+     FROM ingest_log ${clause} ORDER BY ${col} ${dir}, id DESC LIMIT ? OFFSET ?`
+  ).all(...args, p.pageSize, (p.page - 1) * p.pageSize) as any[];
+  return { rows, total };
+}
+
+// Paginated, sortable, filterable DMARC report list.
+const REPORTS_SORT: Record<string, string> = {
+  reporter: "r.org_name", domain: "pp.domain", range: "r.date_end", messages: "messages",
+};
+export function reportsPage(
+  dbPath: string | undefined,
+  p: { q: string; domain: string; sort: string; dir: "asc" | "desc"; page: number; pageSize: number },
+) {
+  const db = getDb(dbPath);
+  const where: string[] = []; const args: any[] = [];
+  if (p.q) { where.push("(r.org_name LIKE ? OR r.report_id LIKE ?)"); args.push(`%${p.q}%`, `%${p.q}%`); }
+  if (p.domain) { where.push("pp.domain = ?"); args.push(p.domain); }
+  const clause = where.length ? "WHERE " + where.join(" AND ") : "";
+  const col = REPORTS_SORT[p.sort] ?? "r.date_end";
+  const dir = p.dir === "asc" ? "ASC" : "DESC";
+  const base = `FROM report r LEFT JOIN policy_published pp ON pp.report_id = r.id ${clause}`;
+  const total = (db.prepare(`SELECT COUNT(*) c ${base}`).get(...args) as any).c as number;
+  const rows = db.prepare(
+    `SELECT r.id, r.org_name AS orgName, r.report_id AS reportId, r.date_begin AS dateBegin, r.date_end AS dateEnd, pp.domain,
+       (SELECT COALESCE(SUM(count),0) FROM record WHERE report_id = r.id) AS messages
+     ${base} ORDER BY ${col} ${dir}, r.id DESC LIMIT ? OFFSET ?`
+  ).all(...args, p.pageSize, (p.page - 1) * p.pageSize) as any[];
+  return { rows, total };
+}
+
 // DKIM (selector, signing-domain) pairs observed in ingested reports. Lets the DNS
 // report look up the actual DKIM keys this domain's mail has been signed with.
 export function observedDkimPairs(dbPath: string | undefined, headerFrom?: string): { selector: string; domain: string }[] {
