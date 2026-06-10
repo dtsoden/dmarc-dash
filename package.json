@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "migrate": "tsx src/lib/db/migrate.ts",
-    "poll:once": "tsx scripts/poll-once.ts"
+    "poll:once": "tsx scripts/poll-once.ts",
+    "digest": "tsx scripts/send-digest.ts"
   },
   "dependencies": {
     "@azure/msal-node": "^5.2.3",
