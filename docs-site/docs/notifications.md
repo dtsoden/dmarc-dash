@@ -27,12 +27,17 @@ The token is stored AES-encrypted at rest and is never returned to the browser.
 
 ## Digest schedules
 
-Once configured, DMARC Dashboard sends:
+DMARC Dashboard can send a **weekly** and a **monthly** digest summarizing recent DMARC
+activity to the configured recipients. Each is configured under **Settings ->
+Notifications**:
 
-- A **weekly** digest.
-- A **monthly** digest.
+- Toggle each digest **on or off** independently. A digest that is off is simply not sent.
+- For the weekly digest, pick the **day of the week** and the **time**.
+- For the monthly digest, pick the **day of the month** (1 to 28, so it lands every month)
+  and the **time**.
 
-These summarize recent DMARC activity for the configured recipients.
+Click **Edit schedule** to open the picker; a plain-language summary (for example, "Every
+Monday at 8:00 AM") shows exactly when it will send. No cron syntax required.
 
 ## What email is used for
 

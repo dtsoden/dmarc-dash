@@ -5,6 +5,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useDialog } from "@/components/dialog";
 import { HelpLink } from "@/components/help-link";
 import { RestoreCard } from "@/components/restore-card";
+import { ScheduleField } from "@/components/schedule-field";
 
 const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 const DOMAIN_RE = /^(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))+$/i;
@@ -177,11 +178,14 @@ export function SettingsForm() {
             <input className={input} value={f.mailersend_from} onChange={(e) => set("mailersend_from", e.target.value)} /></div>
           <div><label className={labelCls}>Recipients (comma-separated)</label>
             <input className={input} value={f.digest_recipients} onChange={(e) => set("digest_recipients", e.target.value)} /></div>
-          <div className="flex gap-2">
-            <div className="flex-1"><label className={labelCls}>Weekly cron</label>
-              <input className={input} value={f.digest_weekly_cron} onChange={(e) => set("digest_weekly_cron", e.target.value)} /></div>
-            <div className="flex-1"><label className={labelCls}>Monthly cron</label>
-              <input className={input} value={f.digest_monthly_cron} onChange={(e) => set("digest_monthly_cron", e.target.value)} /></div>
+          <div className="space-y-2">
+            <label className={labelCls}>Digest schedule</label>
+            <ScheduleField mode="weekly" label="Weekly digest"
+              description="A summary covering the past week."
+              cron={f.digest_weekly_cron} onChange={(c) => set("digest_weekly_cron", c)} />
+            <ScheduleField mode="monthly" label="Monthly digest"
+              description="A summary covering the past month."
+              cron={f.digest_monthly_cron} onChange={(c) => set("digest_monthly_cron", c)} />
           </div>
           <SaveBar onSave={() => save()} msg={msg} />
         </section>
