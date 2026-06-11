@@ -15,6 +15,9 @@ Releases are tagged `vMAJOR.MINOR.PATCH` and published on GitHub.
 - **Documentation search.** The bundled docs now have full-text search, built into the
   static output at build time and fully client-side, so it works self-hosted with no
   external service.
+- **Landing page "The problem" section.** A business-focused section right below the hero
+  explaining what goes wrong (spoofing, real mail lost to spam, unread reports) and why it
+  matters, written for decision makers rather than mail administrators.
 
 ### Fixed
 

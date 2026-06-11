@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import {
   Mail, ShieldCheck, Globe2, Network, MapPin, Send, Palette, DatabaseBackup,
-  ArrowRight, BookOpen, Lock, KeyRound,
+  ArrowRight, BookOpen, Lock, KeyRound, ShieldX, MailWarning, EyeOff,
 } from "lucide-react";
 import { getBrand } from "@/lib/brand";
 import pkg from "../../../package.json";
@@ -81,6 +81,7 @@ export default function LandingPage() {
             )}
           </div>
           <div className="ml-auto hidden items-center gap-6 text-sm text-[#8b98ab] md:flex">
+            <a href="#problem" className="transition-colors hover:text-white">The problem</a>
             <a href="#features" className="transition-colors hover:text-white">Features</a>
             <a href="#how" className="transition-colors hover:text-white">How it works</a>
             <a href="/docs" target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-white">Docs</a>
@@ -125,9 +126,9 @@ export default function LandingPage() {
               .
             </h1>
             <p className="mt-5 max-w-xl text-lg leading-relaxed text-[#8b98ab]">
-              {b.appName} watches your mailbox, ingests the DMARC aggregate reports the world is
-              already sending you, and turns the XML noise into clear answers: what passed, what
-              failed, and where it came from.
+              {b.appName} reads the reports mail providers already send about your domain and
+              turns them into plain answers: who is sending as your brand, which messages reach
+              customers, and what is quietly disappearing into spam.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Link href="/login"
@@ -191,6 +192,63 @@ export default function LandingPage() {
               </div>
             </div>
           </div>
+        </div>
+      </section>
+
+      {/* ===== The problem ===== */}
+      <section id="problem" className="border-t border-white/[0.06]">
+        <div className="mx-auto max-w-6xl scroll-mt-20 px-5 py-20 md:py-24">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em]" style={{ color: ACCENT }}>The problem</p>
+          <h2 className="mt-3 max-w-2xl font-display text-3xl font-bold tracking-tight md:text-4xl">
+            Bad things happen to email quietly.
+          </h2>
+          <p className="mt-3 max-w-2xl text-lg text-[#8b98ab]">
+            No alarm goes off when your domain gets abused or your messages stop landing.
+            You find out from the fallout.
+          </p>
+
+          <div className="mt-10 grid gap-4 md:grid-cols-3">
+            <div className="rounded-2xl border border-white/[0.07] bg-white/[0.02] p-6">
+              <span className="grid h-11 w-11 place-items-center rounded-xl border border-red-400/20 bg-red-400/10 text-red-400">
+                <ShieldX className="size-5" />
+              </span>
+              <h3 className="mt-4 font-display text-lg font-semibold">Criminals send email as you</h3>
+              <p className="mt-2 text-sm leading-relaxed text-[#8b98ab]">
+                Fake invoices and phishing go out under your name. Your customers cannot tell
+                the difference, and every one that lands burns trust you spent years building.
+              </p>
+            </div>
+            <div className="rounded-2xl border border-white/[0.07] bg-white/[0.02] p-6">
+              <span className="grid h-11 w-11 place-items-center rounded-xl border border-amber-400/20 bg-amber-400/10 text-amber-400">
+                <MailWarning className="size-5" />
+              </span>
+              <h3 className="mt-4 font-display text-lg font-semibold">Your real mail lands in spam</h3>
+              <p className="mt-2 text-sm leading-relaxed text-[#8b98ab]">
+                Gmail and Microsoft grade every message you send. Fail their checks and your
+                quotes, invoices, and campaigns vanish into junk folders. No bounce, no warning.
+                Sales just hears silence.
+              </p>
+            </div>
+            <div className="rounded-2xl border border-white/[0.07] bg-white/[0.02] p-6">
+              <span className="grid h-11 w-11 place-items-center rounded-xl border border-white/[0.08] bg-white/[0.04]" style={{ color: TEAL }}>
+                <EyeOff className="size-5" />
+              </span>
+              <h3 className="mt-4 font-display text-lg font-semibold">The evidence goes unread</h3>
+              <p className="mt-2 text-sm leading-relaxed text-[#8b98ab]">
+                Mailbox providers send your company reports every day naming exactly who is
+                sending as your domain. Almost nobody reads them, because they arrive as files
+                built for machines, not people.
+              </p>
+            </div>
+          </div>
+
+          <p className="mt-10 max-w-2xl text-lg leading-relaxed text-[#e6edf6]">
+            {b.appName} reads those reports for you, so the first time you hear about a problem
+            is not from a customer.{" "}
+            <a href="#features" className="inline-flex items-center gap-1 font-medium transition-opacity hover:opacity-80" style={{ color: ACCENT }}>
+              See what you get <ArrowRight className="size-4" />
+            </a>
+          </p>
         </div>
       </section>
 
