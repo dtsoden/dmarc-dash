@@ -5,6 +5,7 @@ import { locate } from "@/lib/geo/geoip";
 import { SourceTable } from "@/components/source-table";
 import { GeoMap } from "@/components/geo-map";
 import { FilterBar } from "@/components/filter-bar";
+import { HelpLink } from "@/components/help-link";
 
 export const dynamic = "force-dynamic";
 
@@ -35,7 +36,10 @@ export default async function SourcesPage({ searchParams }: { searchParams: Prom
         </div>
       )}
       <div className="card-elev rounded-2xl border border-border bg-card p-5">
-        <h2 className="font-display text-sm font-semibold">Top sending sources</h2>
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="font-display text-sm font-semibold">Top sending sources</h2>
+          <HelpLink href="/docs/geoip" />
+        </div>
         <p className="mb-4 text-xs text-muted-foreground">Ranked by message volume across the selected range.</p>
         <SourceTable rows={sources} />
       </div>

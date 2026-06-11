@@ -13,6 +13,15 @@ Each step validates its own fields with plain-English errors, so you fix problem
 Once setup is complete, the wizard's test endpoints are locked. You manage everything afterward from **Settings**.
 :::
 
+## New system, or restore?
+
+The wizard opens with a choice:
+
+- **Set up a new system** walks you through the steps below to create the admin account and configure a mailbox, polling, notifications, and branding. This is the usual path.
+- **Restore from a backup** rebuilds this instance from a backup zip taken on another dashboard, no setup steps needed. The entire data volume, including the admin login, is replaced with the backup's contents, and the instance becomes an exact clone of the original.
+
+Choose **Restore from a backup** when you are migrating to a new server or standing up a replacement instance. See [Backup and Restore](./backup-and-restore.md) for the full workflow. The rest of this page covers **Set up a new system**.
+
 ## Step 1: Administrator account
 
 Create the first admin. This account can do everything: manage users, mailboxes, notifications, branding, and all settings.

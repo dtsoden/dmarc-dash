@@ -67,7 +67,8 @@ instance and restore straight into it.
 
 1. Start a fresh container with an empty data volume (a new Docker host, Easypanel, or
    anywhere else). It will show the **setup wizard** because no admin exists yet.
-2. On the first wizard screen, click **Restore from a backup instead**.
+2. On the wizard's first screen, choose **Restore from a backup** instead of **Set up a
+   new system**.
 3. Upload your backup zip and confirm.
 4. The instance restarts as an exact copy of the original, same login, same monitored
    domains, same history.
@@ -79,7 +80,7 @@ precisely so a fresh deployment can become a clone in one step.
 
 1. On the old instance: **Settings -> Backup -> Backup -> Download backup**.
 2. Deploy the dashboard on the new server with an empty data volume.
-3. On the new instance's setup wizard: **Restore from a backup instead**, upload the zip.
+3. On the new instance's setup wizard, choose **Restore from a backup** and upload the zip.
 4. After it restarts, sign in. Point your DMARC `rua` DNS records and mailbox at the new
    instance if anything about the hostname changed.
 5. Decommission the old instance once you have confirmed the new one is healthy.

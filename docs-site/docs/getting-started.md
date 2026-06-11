@@ -68,6 +68,10 @@ Open the app in a browser, for example `http://your-host:9693/`. On first run th
 
 Walk through it in [Setup Wizard](./setup-wizard.md).
 
+## Navigating the dashboard
+
+On a desktop screen the full navigation lives in a sidebar on the left, and a **Documentation** link sits in the top-right of the header. On phones and narrow windows the sidebar collapses behind a hamburger button in the top-left of the header: tap it to slide out a drawer with the same navigation plus the Documentation link. The dashboard is fully usable on mobile.
+
 ## Back up your encryption key
 
 On first run the app generates `data/app.key`, the AES key used to encrypt every secret at rest (mailbox passwords, API tokens, client secrets).

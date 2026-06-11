@@ -6,6 +6,7 @@ import { TableToolbar } from "@/components/table-toolbar";
 import { SortHeader } from "@/components/sort-header";
 import { Pager } from "@/components/pager";
 import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table";
+import { HelpLink } from "@/components/help-link";
 
 export const dynamic = "force-dynamic";
 
@@ -33,7 +34,10 @@ export default async function IngestLogPage({ searchParams }: { searchParams: Pr
       </div>
 
       <div className="card-elev rounded-2xl border border-border bg-card p-5">
-        <h2 className="mb-4 font-display text-sm font-semibold">Ingest history</h2>
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h2 className="font-display text-sm font-semibold">Ingest history</h2>
+          <HelpLink href="/docs/polling-and-safe-delete" />
+        </div>
         <TableToolbar searchPlaceholder="Search file or reporter..." filters={[{
           key: "status", label: "All statuses",
           options: [{ value: "ingested", label: "Ingested" }, { value: "duplicate", label: "Duplicate" }, { value: "failed", label: "Failed" }],
