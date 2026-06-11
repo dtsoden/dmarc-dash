@@ -12,7 +12,7 @@ DMARC Dashboard is white-label. You can rebrand the entire app: its name, colors
 - **App name.** Replaces "DMARC Dashboard" throughout the UI.
 - **Brand color (per mode).** Separate colors for **light** and **dark** mode. The brand color drives buttons, active tabs, links, the focus ring, and the logo mark. Button and logo text auto-contrasts by luminance, so it stays readable on light or dark brand colors.
 - **Default theme.** Light or dark, the default the app loads in. A user's own light/dark toggle overrides this per browser.
-- **Logo.** Uploaded and shown in the app.
+- **Logo.** Replaces the default mark and wordmark everywhere the brand appears: the sidebar header (and the mobile drawer), and the sign-in screens (login, forgot password, and reset password). If no logo is uploaded, the default mark and app name are shown instead.
 - **Favicon.** Uploaded and used as the browser tab icon.
 
 ## How it works

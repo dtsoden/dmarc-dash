@@ -5,6 +5,7 @@ import AdmZip from "adm-zip";
 import { isWizardOrAdmin } from "@/lib/auth/guard";
 import { bootstrap } from "@/lib/config";
 import { closeDb } from "@/lib/db/connection";
+import { stopScheduler } from "@/lib/scheduler";
 
 // POST /api/restore  (multipart, field "file" = a backup zip from /api/backup)
 //
@@ -50,25 +51,30 @@ export async function POST(req: Request) {
   const root = path.resolve(dataDir);
   const dbName = path.basename(dbPath);
 
-  // Sanity: a real backup always carries the database. Refuse anything else so we never
-  // wipe the data volume with an unrelated zip.
-  const hasDb = entries.some((e) => !e.isDirectory && path.basename(e.entryName) === dbName);
+  // Sanity: a real backup always carries the database at the archive ROOT (where the
+  // backup endpoint puts it). A nested copy elsewhere does not count; accepting one
+  // would "succeed" without ever replacing the live database.
+  const norm = (n: string) => n.replace(/\\/g, "/");
+  const hasDb = entries.some((e) => !e.isDirectory && norm(e.entryName) === dbName);
   if (!hasDb) {
-    return NextResponse.json({ error: `Not a DMARC Dashboard backup (no ${dbName} inside)` }, { status: 400 });
+    return NextResponse.json({ error: `Not a DMARC Dashboard backup (no ${dbName} at the archive root)` }, { status: 400 });
   }
 
-  // Guard against zip-slip: every target must resolve inside the data directory.
+  // Guard against zip-slip: every target must resolve strictly inside the data directory.
   const planned: Array<{ entry: AdmZip.IZipEntry; target: string }> = [];
   for (const entry of entries) {
     if (entry.isDirectory) continue;
     const target = path.resolve(root, entry.entryName);
-    if (target !== root && !target.startsWith(root + path.sep)) {
+    if (target === root || !target.startsWith(root + path.sep)) {
       return NextResponse.json({ error: "Backup contains an unsafe path" }, { status: 400 });
     }
     planned.push({ entry, target });
   }
 
   try {
+    // Quiesce the scheduler first: an in-flight poll would reopen the database and
+    // write stale rows into the volume we are about to replace.
+    await stopScheduler();
     // Release our handle before overwriting the database file.
     closeDb();
     fs.mkdirSync(root, { recursive: true });

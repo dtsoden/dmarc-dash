@@ -21,6 +21,8 @@ export const dynamic = "force-dynamic";
 // Live SQLite files we never copy raw: in WAL mode the .db on disk can lag behind
 // the -wal log, so a naive copy may be inconsistent. We add a checkpointed snapshot
 // (taken with better-sqlite3's online backup) under the canonical name instead.
+// Matched by relative path at the volume ROOT only; a stray copy in a subfolder
+// (e.g. old/dmarc.db) is ordinary data and still gets backed up.
 const LIVE_DB_FILES = new Set(["dmarc.db", "dmarc.db-wal", "dmarc.db-shm"]);
 
 // Collect every file under `dir` as [absolutePath, posixRelativePath] pairs.
@@ -57,7 +59,7 @@ export async function GET() {
 
     const zip = new AdmZip();
     for (const [abs, rel] of walk(dataDir)) {
-      if (LIVE_DB_FILES.has(path.basename(rel))) continue; // snapshot replaces these
+      if (LIVE_DB_FILES.has(rel)) continue; // snapshot replaces these root-level files
       const dir = path.posix.dirname(rel);
       zip.addLocalFile(abs, dir === "." ? "" : dir);
     }

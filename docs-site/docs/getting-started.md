@@ -5,7 +5,7 @@ title: Getting Started
 
 # Getting Started
 
-DMARC Dashboard ships as a single Docker container. You deploy it, open it in a browser, and the first run takes you through a Setup Wizard. There are no config files of secrets to edit: everything is entered in the wizard and stored, encrypted, in the database.
+DMARC Dashboard ships as a single Docker container. You deploy it, open it in a browser, and the first run takes you through a Setup Wizard. There are no config files or secrets to edit: everything is entered in the wizard and stored, encrypted, in the database.
 
 ## What you'll need
 
@@ -44,12 +44,13 @@ docker compose up -d --build
 
 ### Environment variables
 
-There are only two, and neither holds a secret:
+There are only three, and none of them holds a secret:
 
 | Variable   | Purpose                                            | Default      |
 | ---------- | -------------------------------------------------- | ------------ |
 | `DATA_DIR` | Where the app stores its data inside the container | `/app/data`  |
 | `PORT`     | Port the app listens on inside the container       | `3000`       |
+| `LANDING`  | Set to `1` to serve a public landing page at `/` for signed-out visitors. See [Deployment](./deployment.md#optional-public-landing-page) | unset (off)  |
 
 All other configuration (mailbox credentials, notifications, branding, GeoIP) is entered in the Setup Wizard and saved to the database.
 

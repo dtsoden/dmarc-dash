@@ -92,6 +92,20 @@ export function rescheduleDigests() {
 // Re-apply both schedules after settings change (wizard finish, Settings save).
 export function applySettingsChange() { reschedulePoll(); rescheduleDigests(); }
 
+// Stop every scheduled job and wait (bounded) for an in-flight poll to drain.
+// Restore calls this before overwriting the database files; without it a poll
+// mid-flight could reopen the db and write stale rows into the restored volume.
+export async function stopScheduler(maxWaitMs = 20000): Promise<boolean> {
+  pollTask?.stop(); pollTask = null;
+  weeklyTask?.stop(); weeklyTask = null;
+  monthlyTask?.stop(); monthlyTask = null;
+  const deadline = Date.now() + maxWaitMs;
+  while (running && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  return !running;
+}
+
 export function startScheduler() {
   if (started) return;
   started = true;

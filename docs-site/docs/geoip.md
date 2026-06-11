@@ -25,7 +25,7 @@ MaxMind's account signup, password reset, and confirmation emails depend on thei
 
 1. Go to **Settings -> GeoIP** (or the wizard's GeoIP step).
 2. Paste the license key and save.
-3. Saving the key now **auto-downloads** the GeoLite2 City database into the `data/` volume.
+3. Saving the key **auto-downloads** the GeoLite2 City database into the `data/` volume.
 
 Once the database is present, the source map renders. Until then, the rest of the app works normally and the map simply does not display.
 

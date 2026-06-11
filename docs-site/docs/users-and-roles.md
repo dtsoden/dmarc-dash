@@ -12,7 +12,7 @@ DMARC Dashboard supports multiple users with three roles. There is no self-regis
 | Role            | Can do                                                                 |
 | --------------- | --------------------------------------------------------------------- |
 | **Administrator** | Everything: manage users, mailboxes, notifications, branding, GeoIP, and all settings. |
-| **Analyst**     | View dashboards, run a manual poll ("Poll now"), and export data.      |
+| **Analyst**     | View dashboards and reports, and run a manual poll ("Poll now").       |
 | **Viewer**      | Read-only access to dashboards and reports.                           |
 
 :::info The last administrator is protected
@@ -45,4 +45,4 @@ A user who has lost their password uses **forgot password** on the sign-in scree
 
 ## Change password
 
-A signed-in user can change their own password from their account settings.
+A signed-in user can change their own password on the change-password screen at `/change-password`. The current password is required.

@@ -59,11 +59,12 @@ You can add more domains later under **Settings -> Mailbox Monitoring**. See [Mu
 
 ## Step 4: Notifications (optional)
 
-Configure MailerSend to enable weekly/monthly digests, user invites, and password resets.
+Configure MailerSend to enable weekly/monthly digests, user invites, and password resets. All fields start empty; leave the token blank to skip email entirely.
 
 - MailerSend API token.
 - A verified from-address.
 - Digest recipients.
+- The **digest schedules**, with the same friendly day-and-time pickers as **Settings -> Notifications**: toggle the weekly and monthly digests on or off and pick when each sends. No cron syntax anywhere. See [Notifications](./notifications.md).
 
 :::warning
 Adding users later requires notifications to be configured, because new users receive an emailed invite link rather than a password. See [Users and Roles](./users-and-roles.md).
@@ -73,7 +74,7 @@ You can skip this and configure it later in **Settings -> Notifications**.
 
 ## Step 5: GeoIP (optional)
 
-Paste a free MaxMind GeoLite2 license key to enable the geographic source map. When you save the key, the app now auto-downloads the GeoLite2 City database. See [GeoIP](./geoip.md).
+Paste a free MaxMind GeoLite2 license key to enable the geographic source map. When you save the key, the app auto-downloads the GeoLite2 City database. See [GeoIP](./geoip.md).
 
 You can skip this; everything else works without the map.
 

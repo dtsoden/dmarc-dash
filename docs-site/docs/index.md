@@ -20,7 +20,7 @@ You point your domain's DMARC record at a dedicated mailbox. DMARC Dashboard con
 
 ## Designed for simple operation
 
-- **All configuration lives in the app.** A first-run Setup Wizard creates your admin account and writes every setting to a local database. The only environment variables are `DATA_DIR` and `PORT`.
+- **All configuration lives in the app.** A first-run Setup Wizard creates your admin account and writes every setting to a local database. The only environment variables are `DATA_DIR`, `PORT`, and the optional `LANDING` switch; none holds a secret.
 - **Runs anywhere Docker runs.** One container, one `data/` volume.
 - **Safe by design.** The ingester only ever touches genuine DMARC report emails. Ordinary mail is never parsed, moved, or deleted.
 

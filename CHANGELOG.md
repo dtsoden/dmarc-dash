@@ -16,6 +16,25 @@ Releases are tagged `vMAJOR.MINOR.PATCH` and published on GitHub.
   static output at build time and fully client-side, so it works self-hosted with no
   external service.
 
+### Fixed
+
+- Docs search box: the magnifying glass icon is now light in dark mode, and the input
+  auto-expands as you type past its resting width (in browsers supporting content sizing).
+- Restore quiesces the scheduler first, so a poll in flight can no longer write stale
+  rows into the volume while it is being replaced.
+- Backup no longer skips a user's own `dmarc.db` copies in subfolders, and restore only
+  accepts archives with the database at the root, where real backups place it.
+- The digest schedule picker shows a hand-entered cron it cannot represent as
+  "Custom schedule" instead of incorrectly claiming the digest is off.
+- The public landing page renders with fallback branding instead of erroring if the
+  database is unreadable.
+- Mobile drawer releases its scroll lock when the viewport grows past the breakpoint;
+  Enter on the schedule dialog's Cancel button no longer saves; a cleared polling
+  interval no longer silently becomes one-minute polling.
+- Documentation accuracy: LANDING listed in the environment tables, logo placement
+  includes the sign-in screens, wizard step 4 documents the schedule pickers and empty
+  defaults, and the analyst role no longer claims a nonexistent export feature.
+
 ## [0.1.1] - 2026-06-11
 
 ### Added

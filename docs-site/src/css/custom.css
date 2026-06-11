@@ -42,3 +42,24 @@
 /* The brand mark in the navbar reads on the dark rail in both modes. */
 .navbar__title { font-family: "Sora", sans-serif; letter-spacing: -0.01em; }
 .navbar__brand:hover { color: #fff; }
+
+/* --- Docs search box ------------------------------------------------------- */
+
+/* Infima draws the magnifying glass as a background-image data URI whose
+   fill="currentColor" cannot inherit (background SVGs resolve it to black),
+   so in dark mode the icon stays black against white text. Re-declare the
+   same icon with an explicit light fill for dark mode. */
+[data-theme='dark'] {
+  --ifm-navbar-search-input-icon: url('data:image/svg+xml;utf8,<svg fill="rgba(255,255,255,0.85)" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" height="16px" width="16px"><path d="M6.02945,10.20327a4.17382,4.17382,0,1,1,4.17382-4.17382A4.15609,4.15609,0,0,1,6.02945,10.20327Zm9.69195,4.2199L10.8989,9.59979A5.88021,5.88021,0,0,0,12.058,6.02856,6.00467,6.00467,0,1,0,9.59979,10.8989l4.82338,4.82338a.89729.89729,0,0,0,1.29912,0,.89749.89749,0,0,0-.00087-1.29909Z" /></svg>');
+}
+
+/* Auto-expand while typing: the box keeps its compact resting width
+   (min-width = Infima's 12.5rem default) and grows with the typed text up
+   to a cap. Browsers without field-sizing support simply keep the fixed
+   width, which is today's behavior. */
+.navbar__search-input {
+  field-sizing: content;
+  width: auto;
+  min-width: 12.5rem;
+  max-width: min(34rem, 55vw);
+}

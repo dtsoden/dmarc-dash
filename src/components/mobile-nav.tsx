@@ -27,14 +27,23 @@ export function MobileNav({ role, username, appName, logoExt }: { role: Role; us
   // otherwise stay open after a link click).
   useEffect(() => { setOpen(false); }, [path]);
 
-  // Esc to close and lock body scroll while open.
+  // Esc to close and lock body scroll while open. Also close if the viewport grows
+  // past the md breakpoint: the drawer becomes display:none up there, so without this
+  // the scroll lock would survive a rotation/resize with no visible way to release it.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
     document.addEventListener("keydown", onKey);
+    const mq = window.matchMedia("(min-width: 768px)");
+    const onMq = () => { if (mq.matches) setOpen(false); };
+    mq.addEventListener("change", onMq);
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    return () => { document.removeEventListener("keydown", onKey); document.body.style.overflow = prev; };
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      mq.removeEventListener("change", onMq);
+      document.body.style.overflow = prev;
+    };
   }, [open]);
 
   const drawer = (

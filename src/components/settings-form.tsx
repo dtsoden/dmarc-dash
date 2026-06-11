@@ -94,7 +94,9 @@ export function SettingsForm() {
     setMsg("Saving...");
     const body: Record<string, unknown> = {
       ...f,
-      poll_interval_minutes: Number(f.poll_interval_minutes),
+      // Clamp to the documented 1-1440 range; a cleared field coerces to 0, which the
+      // scheduler would otherwise round up to polling every single minute.
+      poll_interval_minutes: Math.min(1440, Math.max(1, Math.trunc(Number(f.poll_interval_minutes)) || 15)),
       digest_recipients: f.digest_recipients.split(",").map((s) => s.trim()).filter(Boolean),
       ...extra,
     };

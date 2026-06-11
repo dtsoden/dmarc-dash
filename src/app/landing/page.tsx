@@ -53,7 +53,11 @@ const BARS: Array<[number, number]> = [
 
 export default function LandingPage() {
   if (process.env.LANDING !== "1") notFound();
-  const b = getBrand();
+  // Same fallback as the root layout: the public page must render even if the
+  // database is fresh or unreadable.
+  let b;
+  try { b = getBrand(); }
+  catch { b = { appName: "DMARC Dashboard", colorLight: "#0093a2", colorDark: "#00df7e", defaultTheme: "dark", logoExt: "", faviconExt: "" }; }
 
   return (
     <div className="min-h-screen bg-[#070d16] font-sans text-[#e6edf6] [color-scheme:dark]">

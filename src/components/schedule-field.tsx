@@ -21,29 +21,31 @@ const WEEKDAYS = [
 ];
 const WEEKDAY_NAME: Record<number, string> = Object.fromEntries(WEEKDAYS.map((d) => [d.v, d.label]));
 
-interface Parsed { enabled: boolean; minute: number; hour: number; dow: number; dom: number }
+interface Parsed { enabled: boolean; minute: number; hour: number; dow: number; dom: number; custom?: string }
 
 const DEFAULTS: Parsed = { enabled: false, minute: 0, hour: 8, dow: 1, dom: 1 };
 
-// Parse a stored cron into the fields we expose. Anything we don't recognise (empty,
-// wrong shape, ranges/lists) reads as "off" with sensible defaults ready for when the
-// user turns it on.
+// Parse a stored cron into the fields we expose. Empty means "off". A non-empty cron
+// the picker cannot represent (ranges, steps, day 29-31, set by hand before the picker
+// existed) is still RUN by the scheduler, so it must read as enabled; we surface it as
+// a custom expression rather than lying with "Off".
 function parseCron(cron: string, mode: ScheduleMode): Parsed {
   if (!cron || !cron.trim()) return { ...DEFAULTS };
+  const custom: Parsed = { ...DEFAULTS, enabled: true, custom: cron.trim() };
   const parts = cron.trim().split(/\s+/);
-  if (parts.length !== 5) return { ...DEFAULTS };
+  if (parts.length !== 5) return custom;
   const [mi, ho, dm, , dw] = parts;
   const minute = Number(mi), hour = Number(ho);
-  if (!Number.isInteger(minute) || minute < 0 || minute > 59) return { ...DEFAULTS };
-  if (!Number.isInteger(hour) || hour < 0 || hour > 23) return { ...DEFAULTS };
+  if (!Number.isInteger(minute) || minute < 0 || minute > 59) return custom;
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23) return custom;
   if (mode === "weekly") {
-    if (dm !== "*") return { ...DEFAULTS, minute, hour };
+    if (dm !== "*") return { ...custom, minute, hour };
     const dow = Number(dw);
-    if (!Number.isInteger(dow) || dow < 0 || dow > 7) return { ...DEFAULTS, minute, hour };
+    if (!Number.isInteger(dow) || dow < 0 || dow > 7) return { ...custom, minute, hour };
     return { enabled: true, minute, hour, dow: dow === 7 ? 0 : dow, dom: 1 };
   }
   const dom = Number(dm);
-  if (!Number.isInteger(dom) || dom < 1 || dom > 28) return { ...DEFAULTS, minute, hour };
+  if (!Number.isInteger(dom) || dom < 1 || dom > 28) return { ...custom, minute, hour };
   return { enabled: true, minute, hour, dom, dow: 1 };
 }
 
@@ -63,6 +65,7 @@ function ordinal(n: number): string {
   return n + (s[(v - 20) % 10] || s[v] || s[0]);
 }
 function summarize(p: Parsed, mode: ScheduleMode): string {
+  if (p.custom) return `Custom schedule (${p.custom})`;
   const t = fmtTime(p.hour, p.minute);
   return mode === "weekly"
     ? `Every ${WEEKDAY_NAME[p.dow]} at ${t}`
@@ -144,7 +147,11 @@ function ScheduleModal({ mode, label, initial, onCancel, onSave }: {
 
   const modal = (
     <div role="dialog" aria-modal="true" className="fixed inset-0 z-[60] flex items-center justify-center p-4"
-      onKeyDown={(e) => { if (e.key === "Enter") onSave(p); }}>
+      onKeyDown={(e) => {
+        // Enter submits from the inputs, but must not hijack a focused button
+        // (Tab to Cancel + Enter would otherwise save instead of cancelling).
+        if (e.key === "Enter" && !(e.target instanceof HTMLButtonElement)) onSave(p);
+      }}>
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onCancel} />
       <div className="card-elev animate-rise relative w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-xl">
         <button type="button" onClick={onCancel} aria-label="Close"
