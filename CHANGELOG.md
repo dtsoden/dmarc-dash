@@ -8,6 +8,12 @@ Releases are tagged `vMAJOR.MINOR.PATCH` and published on GitHub.
 
 ## [Unreleased]
 
+### Added
+
+- **Documentation search.** The bundled docs now have full-text search, built into the
+  static output at build time and fully client-side, so it works self-hosted with no
+  external service.
+
 ## [0.1.1] - 2026-06-11
 
 ### Added
