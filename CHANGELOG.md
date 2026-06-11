@@ -8,6 +8,8 @@ Releases are tagged `vMAJOR.MINOR.PATCH` and published on GitHub.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-06-11
+
 ### Added
 
 - **Documentation search.** The bundled docs now have full-text search, built into the
@@ -71,6 +73,7 @@ First tagged release. A self-hosted DMARC aggregate report dashboard.
 - **Deployment.** Single Docker container with one mounted data volume; Cloudflare Tunnel
   friendly.
 
-[Unreleased]: https://github.com/dtsoden/dmarc-dash/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/dtsoden/dmarc-dash/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/dtsoden/dmarc-dash/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/dtsoden/dmarc-dash/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/dtsoden/dmarc-dash/releases/tag/v0.1.0
