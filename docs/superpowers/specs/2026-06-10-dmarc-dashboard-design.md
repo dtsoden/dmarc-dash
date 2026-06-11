@@ -199,7 +199,7 @@ setup, not committed).
   counts, top sending sources (pass/fail), new sources first seen in the period, and
   trend vs. the previous period. HTML email built from the same query layer the
   dashboard uses.
-- Recipients default to `david.soden@beaconspec.com, duane.walker@beaconspec.com`
+- Recipients default to `you@example.com`
   (editable in Settings).
 - A "Send test email" button in Settings/wizard and a one-shot `npm run digest --
   weekly|monthly` command are provided for manual sends and testing.

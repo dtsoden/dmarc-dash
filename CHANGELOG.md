@@ -8,6 +8,22 @@ Releases are tagged `vMAJOR.MINOR.PATCH` and published on GitHub.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-06-11
+
+### Added
+
+- **Public landing page.** Set `LANDING=1` to serve a marketing page at `/` for anonymous
+  visitors, with navigation linking to the docs, GitHub, the latest release download, and
+  the login screen. Signed-in users still go straight to the dashboard. The variable's
+  absence (the default) keeps the page off.
+- **Brand logo on the sign-in screens.** The login, forgot-password, and reset pages now
+  show the uploaded logo (or the app name) like the rest of the app, instead of a
+  hardcoded product name.
+
+### Changed
+
+- Fresh installs no longer prefill the digest from-address or recipients; both start empty.
+
 ## [0.1.0] - 2026-06-11
 
 First tagged release. A self-hosted DMARC aggregate report dashboard.
@@ -49,5 +65,6 @@ First tagged release. A self-hosted DMARC aggregate report dashboard.
 - **Deployment.** Single Docker container with one mounted data volume; Cloudflare Tunnel
   friendly.
 
-[Unreleased]: https://github.com/dtsoden/dmarc-dash/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/dtsoden/dmarc-dash/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/dtsoden/dmarc-dash/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/dtsoden/dmarc-dash/releases/tag/v0.1.0

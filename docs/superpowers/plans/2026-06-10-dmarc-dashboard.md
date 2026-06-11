@@ -573,7 +573,7 @@ export const SETTING_DEFS: Record<string, Def> = {
   delete_mode:           { type: "string", default: "safe" },     // safe|hard
   mailersend_token:      { type: "secret", default: "" },
   mailersend_from:       { type: "string", default: "dmarc@beaconspec.com" },
-  digest_recipients:     { type: "json",   default: ["david.soden@beaconspec.com", "duane.walker@beaconspec.com"] },
+  digest_recipients:     { type: "json",   default: [] },
   digest_weekly_cron:    { type: "string", default: "0 8 * * 1" },
   digest_monthly_cron:   { type: "string", default: "0 8 1 * *" },
   maxmind_license_key:   { type: "secret", default: "" },
@@ -2220,7 +2220,7 @@ button POSTing to `/api/setup/test-email`, (5) GeoIP (optional) [maxmind key]. A
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-const RECIPIENTS_DEFAULT = "david.soden@beaconspec.com, duane.walker@beaconspec.com";
+const RECIPIENTS_DEFAULT = "you@example.com";
 
 export default function SetupWizard() {
   const router = useRouter();
@@ -3935,7 +3935,7 @@ Start the app and open it in a browser — first run redirects to the **Setup Wi
 Enter: admin account; Graph TENANT_ID/CLIENT_ID/CLIENT_SECRET and the mailbox UPN (use
 "Test connection"); poll interval + delete mode; and (optional) the MailerSend token from
 `C:/Users/DavidSoden/registry/email_access_token.txt`, a verified MailerSend from-address,
-digest recipients (default david.soden@ and duane.walker@beaconspec.com), and the MaxMind
+digest recipients (default none; set your own), and the MaxMind
 key. All values are stored encrypted in the DB; no env file of secrets is used.
 
 ## 6. Smoke test

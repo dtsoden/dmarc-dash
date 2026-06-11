@@ -55,6 +55,23 @@ The compose file maps host `9693` to container `3000`. The host side (`9693`) is
       - "8080:3000"   # serve on host port 8080 instead
 ```
 
+## Optional: public landing page
+
+By default, visiting `/` while signed out redirects straight to the login screen. Setting the
+environment variable `LANDING=1` switches on a public marketing page instead: anonymous
+visitors to `/` see the landing page (with a Log in link in its navigation), while signed-in
+users still land on the dashboard as usual.
+
+```yaml
+    environment:
+      DATA_DIR: /app/data
+      LANDING: "1"
+```
+
+The off state is the **absence** of the variable. Leave `LANDING` out entirely to disable the
+page; do not set `LANDING=0`. When the page is off, its URL serves a 404 and `/` behaves
+exactly as before.
+
 ## Updating
 
 To update to a new version:

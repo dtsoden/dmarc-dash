@@ -19,8 +19,8 @@ export default function LoginPage() {
   return (
     <form onSubmit={submit} className="card-elev w-full max-w-sm space-y-4 rounded-2xl border border-border bg-card p-8">
       <div className="space-y-1 text-center">
-        <h1 className="font-display text-xl font-semibold tracking-tight">DMARC Dashboard</h1>
-        <p className="text-sm text-muted-foreground">Sign in to continue</p>
+        <h1 className="font-display text-xl font-semibold tracking-tight">Sign in</h1>
+        <p className="text-sm text-muted-foreground">Use your username or email</p>
       </div>
       <input className={input} placeholder="Username or email" value={login} onChange={(e) => setLogin(e.target.value)} />
       <input className={input} type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} />

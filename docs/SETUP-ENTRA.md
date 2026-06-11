@@ -38,7 +38,7 @@ Start the app and open it in a browser: first run redirects to the **Setup Wizar
 Enter: admin account; Graph TENANT_ID/CLIENT_ID/CLIENT_SECRET and the mailbox UPN (use
 "Test connection"); poll interval + delete mode; and (optional) the MailerSend token from
 `C:/Users/DavidSoden/registry/email_access_token.txt`, a verified MailerSend from-address,
-digest recipients (default david.soden@ and duane.walker@beaconspec.com), and the MaxMind
+digest recipients (default none; set your own), and the MaxMind
 key. All values are stored encrypted in the DB; no env file of secrets is used.
 
 ## 6. Smoke test

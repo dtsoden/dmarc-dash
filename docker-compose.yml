@@ -6,6 +6,7 @@ services:
     environment:
       DATA_DIR: /app/data
       # PORT optional; defaults to 3000
+      LANDING: "1"   # public landing page at "/" for visitors; omit the variable entirely to disable
     volumes:
       - ./data:/app/data      # holds dmarc.db, GeoLite2-City.mmdb, app.key
     restart: unless-stopped

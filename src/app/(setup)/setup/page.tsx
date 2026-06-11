@@ -6,7 +6,7 @@ import { HelpLink } from "@/components/help-link";
 import { RestoreCard } from "@/components/restore-card";
 import { ScheduleField } from "@/components/schedule-field";
 
-const RECIPIENTS_DEFAULT = "david.soden@beaconspec.com, duane.walker@beaconspec.com";
+const RECIPIENTS_DEFAULT = "";
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const DOMAIN_RE = /^(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))+$/i;
 const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
@@ -37,7 +37,7 @@ export default function SetupWizard() {
     tenantId: "", clientId: "", clientSecret: "", mailboxUpn: "",
     imapHost: "", imapPort: "993", imapUsername: "", imapPassword: "", imapTls: true, imapFolder: "INBOX",
     intervalMinutes: "15", deleteMode: "safe",
-    token: "", from: "dmarc@beaconspec.com", recipients: RECIPIENTS_DEFAULT,
+    token: "", from: "", recipients: RECIPIENTS_DEFAULT,
     weeklyCron: "0 8 * * 1", monthlyCron: "0 8 1 * *", maxmind: "",
     appName: "DMARC Dashboard", colorLight: "#0093a2", colorDark: "#00df7e", defaultTheme: "dark",
   });
