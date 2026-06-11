@@ -4,6 +4,7 @@ import { parseFilters } from "@/lib/filters";
 import { KpiCard } from "@/components/kpi-card";
 import { VolumeChart } from "@/components/volume-chart";
 import { FilterBar } from "@/components/filter-bar";
+import { HelpLink } from "@/components/help-link";
 import { Mail, ShieldCheck, KeyRound, ShieldAlert, ShieldX, Server } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -30,7 +31,10 @@ export default async function OverviewPage({ searchParams }: { searchParams: Pro
         <KpiCard title="Sending sources" value={k.distinctSources.toLocaleString()} icon={<Server className="h-4 w-4" />} index={6} />
       </div>
       <div className="card-elev rounded-2xl border border-border bg-card p-5">
-        <h2 className="mb-4 font-display text-sm font-semibold">Volume by day</h2>
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h2 className="font-display text-sm font-semibold">Volume by day</h2>
+          <HelpLink href="/docs/reading-the-dashboard#overview" />
+        </div>
         <VolumeChart data={volume} />
       </div>
     </div>

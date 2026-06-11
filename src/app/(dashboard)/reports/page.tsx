@@ -6,6 +6,7 @@ import { TableToolbar } from "@/components/table-toolbar";
 import { SortHeader } from "@/components/sort-header";
 import { Pager } from "@/components/pager";
 import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table";
+import { HelpLink } from "@/components/help-link";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +20,10 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
 
   return (
     <div className="card-elev rounded-2xl border border-border bg-card p-5">
-      <h2 className="mb-4 font-display text-sm font-semibold">DMARC reports</h2>
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <h2 className="font-display text-sm font-semibold">DMARC reports</h2>
+        <HelpLink href="/docs/reading-the-dashboard#reports" />
+      </div>
       <TableToolbar searchPlaceholder="Search reporter or report ID..." filters={[{
         key: "domain", label: "All domains",
         options: domains.map((d) => ({ value: d, label: d })),

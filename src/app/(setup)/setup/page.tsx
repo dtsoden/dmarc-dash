@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { Mail, Server, Check, Upload, Trash2, RotateCcw } from "lucide-react";
 import { HelpLink } from "@/components/help-link";
 import { RestoreCard } from "@/components/restore-card";
+import { ScheduleField } from "@/components/schedule-field";
 
 const RECIPIENTS_DEFAULT = "david.soden@beaconspec.com, duane.walker@beaconspec.com";
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -320,11 +321,12 @@ export default function SetupWizard() {
             <input className={input} value={f.from} onChange={(e) => set("from", e.target.value)} /></div>
           <div><label className={labelCls}>Recipients (comma-separated)</label>
             <input className={input} value={f.recipients} onChange={(e) => set("recipients", e.target.value)} /></div>
-          <div className="flex gap-2">
-            <div className="flex-1"><label className={labelCls}>Weekly schedule (cron)</label>
-              <input className={input} value={f.weeklyCron} onChange={(e) => set("weeklyCron", e.target.value)} /></div>
-            <div className="flex-1"><label className={labelCls}>Monthly schedule (cron)</label>
-              <input className={input} value={f.monthlyCron} onChange={(e) => set("monthlyCron", e.target.value)} /></div>
+          <div className="space-y-2">
+            <label className={labelCls}>Digest schedule</label>
+            <ScheduleField mode="weekly" label="Weekly digest" description="A summary covering the past week."
+              cron={f.weeklyCron} onChange={(c) => set("weeklyCron", c)} />
+            <ScheduleField mode="monthly" label="Monthly digest" description="A summary covering the past month."
+              cron={f.monthlyCron} onChange={(c) => set("monthlyCron", c)} />
           </div>
           <button type="button" className="rounded-lg border px-3.5 py-2 text-sm" onClick={testEmail}>Send test email</button>
         </>)}
