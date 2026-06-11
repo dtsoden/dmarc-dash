@@ -31,6 +31,22 @@ const config = {
     ],
   ],
 
+  themes: [
+    [
+      // Fully client-side search: the index is built at build time and bundled into
+      // the static output, so it works self-hosted with no external service.
+      "@easyops-cn/docusaurus-search-local",
+      /** @type {import('@easyops-cn/docusaurus-search-local').PluginOptions} */
+      ({
+        docsRouteBasePath: "/",   // docs live at the site root (see preset config above)
+        indexBlog: false,
+        hashed: true,
+        language: ["en"],
+        highlightSearchTermsOnTargetPage: true,
+      }),
+    ],
+  ],
+
   themeConfig:
     /** @type {import('@docusaurus/preset-classic').ThemeConfig} */
     ({
