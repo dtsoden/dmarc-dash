@@ -21,6 +21,8 @@ Releases are tagged `vMAJOR.MINOR.PATCH` and published on GitHub.
 
 ### Fixed
 
+- Signing out lands on the public landing page when `LANDING=1` is set; without the
+  variable it returns to the login screen as before.
 - Docs search box: the magnifying glass icon is now light in dark mode, and the input
   auto-expands as you type past its resting width (in browsers supporting content sizing).
 - Restore quiesces the scheduler first, so a poll in flight can no longer write stale

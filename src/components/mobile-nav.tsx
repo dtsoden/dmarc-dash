@@ -106,7 +106,7 @@ export function MobileNav({ role, username, appName, logoExt }: { role: Role; us
               <div className="truncate text-sm text-white">{username}</div>
               <div className="text-[11px] capitalize text-sidebar-foreground/55">{role}</div>
             </div>
-            <button onClick={() => fetch("/api/auth/logout", { method: "POST" }).then(() => location.assign("/login"))}
+            <button onClick={() => fetch("/api/auth/logout", { method: "POST" }).then((r) => r.json()).then((d) => location.assign(d.redirectTo || "/login")).catch(() => location.assign("/login"))}
               title="Sign out" className="rounded-md p-1.5 text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-white">
               <LogOut className="h-4 w-4" />
             </button>
